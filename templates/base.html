@@ -1,0 +1,106 @@
+{% load static %}
+<!doctype html>
+<html lang="es" data-theme="{% if request.COOKIES.movix_dark_mode == '1' %}dark{% else %}light{% endif %}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Panel administrativo MOVIX">
+    <title>{% block title %}Panel{% endblock %} · MOVIX</title>
+    <link rel="icon" href="{% static 'img/logo-mark.svg' %}" type="image/svg+xml">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}">
+</head>
+<body>
+<svg class="svg-sprite" aria-hidden="true">
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 11 9-8 9 8v9a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24"><path d="m13 2-9 12h8l-1 8 9-12h-8z"/></symbol>
+    <symbol id="i-clipboard" viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V2h6v2M9 9h6M9 13h6M9 17h4"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0 1 13 0"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1z"/></symbol>
+    <symbol id="i-logout" viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="2.5"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="m4 20 4.5-1 10-10-3.5-3.5-10 10zM14 6.5 17.5 10M13 20h7"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6M14 11v6"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 2h8l4 4v16H6zM14 2v5h5M9 12h6M9 16h6"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4m0 0L8 8m4-4 4 4M4 17v3h16v-3"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 2 3 6 7 .9-5 4.7 1.3 6.8L12 17l-6.3 3.4L7 13.6 2 8.9 9 8z"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 7h3l2-3h6l2 3h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2z"/><circle cx="12" cy="13" r="4"/></symbol>
+    <symbol id="i-truck" viewBox="0 0 24 24"><path d="M3 5h11v12H3zM14 9h4l3 4v4h-7z"/><circle cx="7" cy="19" r="2"/><circle cx="18" cy="19" r="2"/></symbol>
+    <symbol id="i-id" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8" cy="11" r="2"/><path d="M5.5 16c.7-2.1 4.3-2.1 5 0M13 10h5M13 14h5"/></symbol>
+    <symbol id="i-map-pin" viewBox="0 0 24 24"><path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0z"/><circle cx="12" cy="10" r="2.5"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+</svg>
+
+<div class="app-shell" id="appShell">
+    <aside class="sidebar" id="sidebar">
+        <a class="brand" href="{% url 'panel:dashboard' %}">
+            <img src="{% static 'img/logo-mark.svg' %}" alt="MOVIX">
+            <span><strong>MOVIX</strong><small>Tu carga, nuestro camino</small></span>
+        </a>
+        <nav class="sidebar-nav" aria-label="Menú principal">
+            <a class="nav-link {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}" data-module-name="Inicio" href="{% url 'panel:dashboard' %}"><svg><use href="#i-home"/></svg><span>Inicio</span></a>
+            <a class="nav-link {% if request.resolver_match.kwargs.kind == 'users' %}active{% endif %}" data-module-name="Usuarios" href="{% url 'panel:profile_list' 'users' %}"><svg><use href="#i-users"/></svg><span>Usuarios</span></a>
+            <a class="nav-link {% if request.resolver_match.kwargs.kind == 'drivers' %}active{% endif %}" data-module-name="Transportistas" href="{% url 'panel:profile_list' 'drivers' %}"><svg><use href="#i-truck"/></svg><span>Transportistas</span></a>
+            <a class="nav-link {% if request.resolver_match.url_name == 'notifications' %}active{% endif %}" data-module-name="Notificaciones" href="{% url 'panel:notifications' %}"><svg><use href="#i-bell"/></svg><span>Notificaciones</span></a>
+            <a class="nav-link {% if 'advertisement' in request.resolver_match.url_name %}active{% endif %}" data-module-name="Publicidad" href="{% url 'panel:advertisements' %}"><svg><use href="#i-bolt"/></svg><span>Publicidad</span></a>
+            <a class="nav-link {% if 'verification' in request.resolver_match.url_name %}active{% endif %}" data-module-name="Verificar documentos" href="{% url 'panel:verification_list' %}"><svg><use href="#i-clipboard"/></svg><span>Verificar documentos</span></a>
+            <a class="nav-link {% if request.resolver_match.url_name == 'admin_profile' %}active{% endif %}" data-module-name="Perfil" href="{% url 'panel:admin_profile' %}"><svg><use href="#i-user"/></svg><span>Perfil</span></a>
+            <a class="nav-link {% if request.resolver_match.url_name == 'settings' %}active{% endif %}" data-module-name="Configuración" href="{% url 'panel:settings' %}"><svg><use href="#i-settings"/></svg><span>Configuración</span></a>
+        </nav>
+        <form action="{% url 'logout' %}" method="post" class="logout-form">
+            {% csrf_token %}
+            <button class="nav-link" type="submit"><svg><use href="#i-logout"/></svg><span>Cerrar sesión</span></button>
+        </form>
+    </aside>
+    <div class="sidebar-scrim" data-sidebar-close></div>
+    <section class="app-main">
+        <header class="topbar">
+            <button class="icon-button menu-button" type="button" data-sidebar-toggle aria-label="Abrir o cerrar menú"><svg><use href="#i-menu"/></svg></button>
+            <form class="global-search" role="search" data-module-search autocomplete="off">
+                <svg><use href="#i-search"/></svg>
+                <input type="search" name="q" placeholder="Buscar un módulo del menú..." aria-label="Buscar módulo" aria-controls="moduleSearchResults" aria-expanded="false">
+                <div class="module-search-results" id="moduleSearchResults" role="listbox"></div>
+            </form>
+            <div class="topbar-actions">
+                <button class="icon-button notification-button" type="button" data-dropdown-toggle="activityDropdown" aria-label="Actividad reciente"><svg><use href="#i-bell"/></svg>{% if top_activity %}<i></i>{% endif %}</button>
+                <div class="dropdown activity-dropdown" id="activityDropdown">
+                    <strong>Actividad reciente</strong>
+                    {% for item in top_activity %}<a href="{% url 'panel:dashboard' %}"><span>{{ item.description|truncatechars:58 }}</span><small>{{ item.created_at|timesince }} atrás</small></a>{% empty %}<p>Sin actividad nueva.</p>{% endfor %}
+                </div>
+                <a href="{% url 'panel:admin_profile' %}" class="admin-chip" title="Abrir perfil"><span>{{ request.user.first_name|default:request.user.username|slice:':1' }}{{ request.user.last_name|slice:':1' }}</span><b>{{ request.user.get_full_name|default:request.user.username }}</b></a>
+            </div>
+        </header>
+        <main class="content">
+            {% if messages %}
+            <div class="messages" aria-live="polite">
+                {% for message in messages %}<div class="alert alert-{{ message.tags|default:'info' }}"><span>{{ message }}</span><button type="button" data-dismiss>×</button></div>{% endfor %}
+            </div>
+            {% endif %}
+            {% block content %}{% endblock %}
+        </main>
+    </section>
+</div>
+
+<dialog class="confirm-dialog" id="confirmDialog">
+    <div class="dialog-icon"><svg><use href="#i-trash"/></svg></div>
+    <h2 id="confirmTitle">Confirmar acción</h2>
+    <p id="confirmText">Esta acción no se puede deshacer.</p>
+    <div class="dialog-actions"><button class="btn btn-secondary" type="button" data-dialog-cancel>Cancelar</button><button class="btn btn-danger" type="button" data-dialog-confirm>Confirmar</button></div>
+</dialog>
+<dialog class="document-preview-dialog" id="documentPreviewDialog">
+    <header><div><span class="preview-kicker">Vista previa</span><h2 id="documentPreviewTitle">Documento</h2></div><button class="icon-button" type="button" data-preview-close aria-label="Cerrar"><svg><use href="#i-x"/></svg></button></header>
+    <div class="document-preview-stage" id="documentPreviewStage"><img id="documentPreviewImage" alt="Vista previa del documento"><iframe id="documentPreviewFrame" title="Vista previa del documento"></iframe><div class="preview-loading"><svg><use href="#i-file"/></svg><span>Cargando archivo…</span></div></div>
+    <footer><span id="documentPreviewName"></span><a class="btn btn-secondary" id="documentPreviewDownload" href="#"><svg><use href="#i-download"/></svg> Descargar original</a></footer>
+</dialog>
+<script src="{% static 'js/app.js' %}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

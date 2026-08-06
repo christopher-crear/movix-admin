@@ -1,0 +1,12 @@
+.env
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.sqlite3
+staticfiles/
+media/
+.idea/
+.vscode/
+.DS_Store
+firebase-service-account.json

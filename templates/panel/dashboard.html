@@ -1,0 +1,27 @@
+{% extends 'base.html' %}
+{% block title %}Inicio{% endblock %}
+{% block content %}
+<div class="page-heading"><div><h1>Buenos días, {{ request.user.first_name|default:request.user.username }} 👋</h1><p>Aquí está el resumen real de MOVIX</p></div></div>
+
+<section class="stat-grid">
+    <a class="stat-card" href="{% url 'panel:profile_list' 'users' %}"><div><span>Usuarios registrados</span><strong>{{ client_count }}</strong><small>Ver gestión completa</small></div><i class="soft-blue"><svg><use href="#i-users"/></svg></i></a>
+    <a class="stat-card" href="{% url 'panel:profile_list' 'drivers' %}"><div><span>Transportistas registrados</span><strong>{{ driver_count }}</strong><small>Ver transportistas</small></div><i class="soft-blue"><svg><use href="#i-users"/></svg></i></a>
+    <div class="stat-card"><div><span>Carreras completadas</span><strong>{{ completed_rides }}</strong><small>{{ in_progress_rides }} en camino</small></div><i class="soft-purple"><svg><use href="#i-map-pin"/></svg></i></div>
+    <a class="stat-card" href="{% url 'panel:verification_list' %}"><div><span>Tasa de verificación</span><strong>{{ verification_rate }}%</strong><small>{{ pending_verifications }} pendientes</small></div><i class="soft-green"><svg><use href="#i-check"/></svg></i></a>
+</section>
+
+<section class="dashboard-charts">
+    <article class="card chart-card"><header><div><h2>Crecimiento mensual</h2><p>Usuarios y transportistas</p></div><span class="pill pill-blue">Últimos 6 meses</span></header><canvas id="growthChart" height="280" aria-label="Gráfico de crecimiento"></canvas></article>
+    <article class="card chart-card"><header><div><h2>Solicitudes mensuales</h2><p>Carreras completadas</p></div></header><canvas id="ridesChart" height="280" aria-label="Gráfico de carreras"></canvas></article>
+</section>
+
+<section class="dashboard-bottom">
+    <article class="card list-card"><header><h2>Transportistas recientes</h2><a href="{% url 'panel:profile_list' 'drivers' %}">Ver todos →</a></header>
+        {% for driver in recent_drivers %}<a class="person-row" href="{% url 'panel:profile_detail' 'drivers' driver.id %}">{% include 'panel/_avatar.html' with person=driver avatar_class='avatar' %}<div><strong>{{ driver.full_name }}</strong><small>{{ driver.vehicle_type|default:'Vehículo sin registrar' }} · {{ driver.vehicle_plate|default:'Sin placa' }}</small><em><b>★ {{ driver.rating }}</b> · {{ driver.completed_trips }} viajes · {{ driver.load_capacity|default:0 }} kg</em></div><span class="pill {% if driver.is_active %}pill-green{% else %}pill-red{% endif %}">{{ driver.status_label }}</span></a>{% empty %}<div class="empty-state">Aún no existen transportistas.</div>{% endfor %}
+    </article>
+    <article class="card activity-card"><header><h2>Actividad reciente</h2></header>
+        {% for activity in recent_activity %}<div class="activity-row"><i class="{% if activity.action == 'delete' %}danger{% elif activity.action == 'update' %}warning{% endif %}">{% if activity.action == 'delete' %}−{% elif activity.action == 'update' %}✎{% else %}+{% endif %}</i><div><strong>{{ activity.description }}</strong><small>{{ activity.created_at|timesince }} atrás · {{ activity.admin_username }}</small></div></div>{% empty %}<div class="empty-state">Las acciones administrativas aparecerán aquí.</div>{% endfor %}
+    </article>
+</section>
+{{ chart_data|json_script:"dashboard-data" }}
+{% endblock %}

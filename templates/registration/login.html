@@ -1,0 +1,32 @@
+{% load static %}
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Acceso administrativo · MOVIX</title>
+    <link rel="icon" href="{% static 'img/logo-mark.svg' %}" type="image/svg+xml">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}">
+</head>
+<body class="login-body">
+<main class="login-card">
+    <section class="login-visual">
+        <div class="login-brand"><img src="{% static 'img/logo-mark.svg' %}" alt=""><span><strong>MOVIX</strong><small>Tu carga, nuestro camino</small></span></div>
+        <div><p class="eyebrow">Panel administrativo</p><h1>Gestiona MOVIX desde un solo lugar.</h1><p>Usuarios, transportistas, documentos, notificaciones y publicidad conectados con tu aplicación móvil.</p></div>
+        <div class="login-route"><span></span><i></i><span></span></div>
+    </section>
+    <section class="login-form-section">
+        <div class="mobile-login-brand"><img src="{% static 'img/logo-mark.svg' %}" alt="MOVIX"><strong>MOVIX</strong></div>
+        <p class="eyebrow">Acceso seguro</p><h2>Bienvenido, administrador</h2><p>Ingresa con la cuenta creada mediante <code>createsuperuser</code>.</p>
+        {% if form.errors %}<div class="alert alert-error">Usuario o contraseña incorrectos, o la cuenta no tiene permisos administrativos.</div>{% endif %}
+        <form method="post" class="stack-form">
+            {% csrf_token %}
+            <div class="field"><label for="id_username">Usuario</label><input class="form-control" id="id_username" name="username" autocomplete="username" autofocus required></div>
+            <div class="field"><label for="id_password">Contraseña</label><div class="password-wrap"><input class="form-control" type="password" id="id_password" name="password" autocomplete="current-password" required><button type="button" data-password-toggle="id_password">Ver</button></div></div>
+            {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+            <button class="btn btn-primary btn-lg" type="submit">Ingresar al panel</button>
+        </form>
+        <small class="security-note">El acceso está restringido a cuentas con permisos de administrador.</small>
+    </section>
+</main>
+<script src="{% static 'js/app.js' %}"></script>
+</body></html>

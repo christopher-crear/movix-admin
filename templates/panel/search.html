@@ -1,0 +1,10 @@
+{% extends 'base.html' %}
+{% block title %}Buscar módulo{% endblock %}
+{% block content %}
+<div class="page-heading"><div><h1>Módulos del panel</h1><p>{% if query|length >= 2 %}Coincidencias para “{{ query }}”{% else %}Escribe al menos dos letras en la barra superior{% endif %}</p></div></div>
+<div class="card search-results">
+    {% for item in module_results %}
+    <a class="person-row" href="{% if item.2 %}{% url item.1 item.2 %}{% else %}{% url item.1 %}{% endif %}"><span class="module-result-icon"><svg><use href="#i-search"/></svg></span><div><strong>{{ item.0 }}</strong><small>Abrir módulo administrativo</small></div><svg class="result-arrow"><use href="#i-arrow"/></svg></a>
+    {% empty %}<div class="empty-state"><svg><use href="#i-search"/></svg><strong>Sin módulos coincidentes</strong><span>Prueba con usuarios, transportistas, publicidad o configuración.</span></div>{% endfor %}
+</div>
+{% endblock %}

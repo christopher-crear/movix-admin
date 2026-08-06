@@ -1,0 +1,8 @@
+Django>=6.0.7,<6.1
+dj-database-url>=2.3,<4
+psycopg[binary]>=3.2,<4
+python-dotenv>=1.0,<2
+whitenoise[brotli]>=6.8,<7
+gunicorn>=23,<24
+requests>=2.32,<3
+firebase-admin>=6.6,<8
