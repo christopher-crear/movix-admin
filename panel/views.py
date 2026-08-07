@@ -5,6 +5,7 @@ from datetime import datetime
 from urllib.parse import quote
 
 import requests
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.forms import PasswordChangeForm
@@ -92,7 +93,22 @@ def landing(request):
             cache.set(rate_key, attempts + 1, 600)
             cache.delete("movix-new-contact-count")
             return redirect(f"{reverse('panel:landing')}?enviado=1#contacto")
-    return render(request, "landing.html", {"contact_form": form})
+    return render(
+        request,
+        "landing.html",
+        {
+            "contact_form": form,
+            "support_email": settings.MOVIX_SUPPORT_EMAIL,
+            "whatsapp_number": settings.MOVIX_WHATSAPP_NUMBER,
+            "whatsapp_display": settings.MOVIX_WHATSAPP_DISPLAY,
+            "facebook_url": settings.MOVIX_FACEBOOK_URL,
+        },
+    )
+
+
+def demo_app(request):
+    """Simulación pública y aislada del flujo móvil de MOVIX."""
+    return render(request, "demo.html")
 
 
 @admin_required

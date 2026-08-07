@@ -7,10 +7,13 @@ El sistema utiliza las tablas existentes de la app móvil (`profiles`, `rides`, 
 ## Funciones incluidas
 
 - Página pública promocional de MOVIX en `/`, optimizada para escritorio y móvil.
+- Demostración interactiva de la petición móvil en `/demo/`, sin pagos ni solicitudes reales.
+- Acceso social simulado para presentaciones con Google, Facebook o invitado, sin solicitar contraseñas.
 - Animaciones suaves en tarjetas, teléfono flotante y secciones al hacer scroll.
 - Información enfocada en transporte de carga liviana en Loja, Ecuador.
 - Formulario público protegido con CSRF, campo trampa y límite básico por IP.
 - Módulo **Solicitudes** para buscar, leer, responder, cerrar y dar seguimiento a contactos.
+- Secciones de descarga, vehículos, testimonios, métodos de pago, preguntas frecuentes y redes de contacto.
 - Inicio de sesión exclusivo para cuentas Django con `is_staff=True`.
 - Dashboard con contadores y gráficos calculados desde la base real.
 - Usuarios y transportistas separados según el campo `profiles.role`.
@@ -96,6 +99,14 @@ debes crearla manualmente si `migrate` terminó correctamente. El archivo
 `sql/contact_requests.sql` queda incluido como alternativa para instalaciones
 en las que el esquema se gestione exclusivamente desde Supabase SQL Editor.
 
+Si ejecutaste primero ese SQL y luego aparece `relation "contact_requests"
+already exists`, conserva la tabla y registra la migración sin volverla a crear:
+
+```powershell
+python manage.py migrate panel 0002 --fake
+python manage.py migrate
+```
+
 La cuenta creada con `createsuperuser` es la que permite entrar al panel. Los clientes y transportistas no pueden iniciar sesión aquí.
 
 Ejecuta:
@@ -106,6 +117,11 @@ python manage.py runserver
 
 Abre `http://127.0.0.1:8000/` para ver la página pública y
 `http://127.0.0.1:8000/login/` para entrar al panel.
+
+Los datos públicos de contacto se pueden cambiar en `.env` mediante
+`MOVIX_SUPPORT_EMAIL`, `MOVIX_WHATSAPP_NUMBER`, `MOVIX_WHATSAPP_DISPLAY` y
+`MOVIX_FACEBOOK_URL`. El panel administrativo no está enlazado desde la página
+pública.
 
 ## 4. Archivos y Supabase Storage
 

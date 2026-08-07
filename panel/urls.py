@@ -7,6 +7,7 @@ app_name = "panel"
 
 urlpatterns = [
     path("", views.landing, name="landing"),
+    path("demo/", views.demo_app, name="demo"),
     path("administracion/", views.dashboard, name="dashboard"),
     path("buscar/", views.global_search, name="search"),
     path("solicitudes/", views.contact_request_list, name="contact_request_list"),

@@ -37,6 +37,19 @@ class PublicPagesTests(SimpleTestCase):
         self.assertContains(response, "Transporte de carga en Loja")
         self.assertContains(response, "data-floating-phone")
 
+    def test_public_demo_renders_without_authentication(self):
+        response = self.client.get(reverse("panel:demo"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Continuar con Google")
+        self.assertContains(response, "Continuar con Facebook")
+        self.assertContains(response, "data-demo-panel=\"request\"")
+
+    def test_landing_does_not_expose_admin_login_link(self):
+        response = self.client.get(reverse("panel:landing"))
+        self.assertNotContains(response, reverse("login"))
+        self.assertContains(response, "movix_soporte@gmail.com")
+        self.assertContains(response, "593989414258")
+
     def test_login_page_renders(self):
         response = self.client.get(reverse("login"))
         self.assertEqual(response.status_code, 200)
