@@ -7,7 +7,9 @@ El sistema utiliza las tablas existentes de la app móvil (`profiles`, `rides`, 
 ## Funciones incluidas
 
 - Página pública promocional de MOVIX en `/`, optimizada para escritorio y móvil.
-- Demostración interactiva de la petición móvil en `/demo/`, sin pagos ni solicitudes reales.
+- Demostración interactiva en `/demo/` con inicio, precios, selección de vehículo,
+  carga, ubicación, pago, oferta y credencial. Todos sus perfiles, placas, rutas,
+  precios e historiales son ficticios y nunca consultan ni modifican Supabase.
 - Acceso social simulado para presentaciones con Google, Facebook o invitado, sin solicitar contraseñas.
 - Animaciones suaves en tarjetas, teléfono flotante y secciones al hacer scroll.
 - Información enfocada en transporte de carga liviana en Loja, Ecuador.

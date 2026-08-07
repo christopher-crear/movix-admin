@@ -42,7 +42,10 @@ class PublicPagesTests(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Continuar con Google")
         self.assertContains(response, "Continuar con Facebook")
-        self.assertContains(response, "data-demo-panel=\"request\"")
+        self.assertContains(response, "data-demo-panel=\"home\"")
+        self.assertContains(response, "data-demo-panel=\"payment\"")
+        self.assertContains(response, "Datos 100% ficticios")
+        self.assertNotContains(response, "Christopher Eras")
 
     def test_landing_does_not_expose_admin_login_link(self):
         response = self.client.get(reverse("panel:landing"))
