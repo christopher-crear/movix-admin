@@ -1,7 +1,7 @@
 from django import forms
 from django.contrib.auth.models import User
 
-from .models import AdminProfile, Advertisement, Profile
+from .models import AdminProfile, Advertisement, ContactRequest, Profile
 
 
 INPUT_CLASS = "form-control"
@@ -203,3 +203,67 @@ class SettingsForm(StyledFormMixin, forms.Form):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.apply_styles()
+
+
+class PublicContactForm(forms.ModelForm):
+    website = forms.CharField(required=False, widget=forms.HiddenInput, label="")
+    privacy_accepted = forms.BooleanField(
+        required=True,
+        label="Acepto que MOVIX utilice estos datos para responder mi solicitud.",
+    )
+
+    class Meta:
+        model = ContactRequest
+        fields = ["full_name", "email", "phone", "request_type", "subject", "message"]
+        labels = {
+            "full_name": "Nombre completo",
+            "email": "Correo electrónico",
+            "phone": "Teléfono",
+            "request_type": "¿Cómo podemos ayudarte?",
+            "subject": "Asunto",
+            "message": "Cuéntanos lo que necesitas",
+        }
+        widgets = {
+            "full_name": forms.TextInput(attrs={"placeholder": "Ej. María González", "autocomplete": "name"}),
+            "email": forms.EmailInput(attrs={"placeholder": "nombre@correo.com", "autocomplete": "email"}),
+            "phone": forms.TextInput(attrs={"placeholder": "+593 99 000 0000", "autocomplete": "tel", "inputmode": "tel"}),
+            "request_type": forms.Select(),
+            "subject": forms.TextInput(attrs={"placeholder": "¿En qué podemos ayudarte?"}),
+            "message": forms.Textarea(attrs={"rows": 5, "placeholder": "Escribe los detalles de tu consulta...", "maxlength": 2000}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            if not isinstance(field.widget, forms.HiddenInput):
+                field.widget.attrs.setdefault("class", "landing-input")
+        self.fields["privacy_accepted"].widget.attrs["class"] = "landing-checkbox"
+
+    def clean_website(self):
+        value = self.cleaned_data.get("website", "")
+        if value:
+            raise forms.ValidationError("No se pudo procesar la solicitud.")
+        return value
+
+
+class ContactResponseForm(forms.ModelForm):
+    class Meta:
+        model = ContactRequest
+        fields = ["admin_response"]
+        labels = {"admin_response": "Respuesta del administrador"}
+        widgets = {
+            "admin_response": forms.Textarea(
+                attrs={
+                    "class": "form-control",
+                    "rows": 8,
+                    "placeholder": "Escribe la respuesta para esta solicitud...",
+                    "maxlength": 4000,
+                }
+            )
+        }
+
+    def clean_admin_response(self):
+        value = (self.cleaned_data.get("admin_response") or "").strip()
+        if not value:
+            raise forms.ValidationError("Escribe una respuesta antes de guardarla.")
+        return value

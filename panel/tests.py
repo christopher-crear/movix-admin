@@ -11,10 +11,11 @@ from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from .forms import ProfileCreateForm, ProfileForm
+from .forms import ProfileCreateForm, ProfileForm, PublicContactForm
 from .models import (
     Advertisement,
     AuditLog,
+    ContactRequest,
     DeviceToken,
     DriverReview,
     Notification,
@@ -30,6 +31,12 @@ EXTERNAL_MODELS = [Profile, Ride, DriverReview, Notification, Advertisement, Not
 
 
 class PublicPagesTests(SimpleTestCase):
+    def test_landing_page_renders(self):
+        response = self.client.get(reverse("panel:landing"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Transporte de carga en Loja")
+        self.assertContains(response, "data-floating-phone")
+
     def test_login_page_renders(self):
         response = self.client.get(reverse("login"))
         self.assertEqual(response.status_code, 200)
@@ -42,6 +49,12 @@ class PublicPagesTests(SimpleTestCase):
 
 
 class FormTests(SimpleTestCase):
+    def test_public_contact_form_uses_compact_fields(self):
+        form = PublicContactForm()
+        self.assertIsInstance(form.fields["full_name"].widget, forms.TextInput)
+        self.assertIsInstance(form.fields["email"].widget, forms.EmailInput)
+        self.assertIsInstance(form.fields["message"].widget, forms.Textarea)
+
     def test_profile_text_fields_render_as_compact_inputs(self):
         form = ProfileForm(role="cliente")
         self.assertIsInstance(form.fields["first_name"].widget, forms.TextInput)
@@ -122,6 +135,7 @@ class PanelIntegrationTests(TransactionTestCase):
     def setUp(self):
         for model in reversed(EXTERNAL_MODELS):
             model.objects.all().delete()
+        ContactRequest.objects.all().delete()
         self.admin = User.objects.create_superuser("admin_movix", "admin@example.com", "PruebaSegura123")
         self.client.force_login(self.admin)
         self.user_profile = Profile.objects.create(
@@ -136,6 +150,45 @@ class PanelIntegrationTests(TransactionTestCase):
             vehicle_plate="LAA-5986", verification_status="approved", profile_verified=True,
             created_at=timezone.now(), updated_at=timezone.now(),
         )
+
+    def test_public_contact_request_is_saved(self):
+        self.client.logout()
+        response = self.client.post(
+            reverse("panel:landing"),
+            {
+                "full_name": "Ana Torres",
+                "email": "ana@example.com",
+                "phone": "+593990001122",
+                "request_type": "service",
+                "subject": "Necesito una mudanza",
+                "message": "Quiero transportar muebles dentro de Loja.",
+                "privacy_accepted": "on",
+                "website": "",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("enviado=1", response.url)
+        self.assertTrue(ContactRequest.objects.filter(email="ana@example.com").exists())
+
+    def test_contact_request_can_be_reviewed_and_answered(self):
+        contact = ContactRequest.objects.create(
+            full_name="Ana Torres",
+            email="ana@example.com",
+            request_type="company",
+            subject="Convenio empresarial",
+            message="Deseo conocer las opciones para mi empresa.",
+        )
+        detail_url = reverse("panel:contact_request_detail", args=[contact.id])
+        response = self.client.get(detail_url)
+        self.assertEqual(response.status_code, 200)
+        contact.refresh_from_db()
+        self.assertEqual(contact.status, ContactRequest.STATUS_READ)
+
+        response = self.client.post(detail_url, {"admin_response": "Con gusto coordinamos una reunión."})
+        self.assertEqual(response.status_code, 302)
+        contact.refresh_from_db()
+        self.assertEqual(contact.status, ContactRequest.STATUS_RESPONDED)
+        self.assertEqual(contact.responded_by, "admin_movix")
 
     def test_dashboard_uses_real_profiles(self):
         response = self.client.get(reverse("panel:dashboard"))
@@ -204,6 +257,12 @@ class PanelIntegrationTests(TransactionTestCase):
         self.assertEqual(response.status_code, 403)
 
     def test_all_administrative_views_render(self):
+        contact = ContactRequest.objects.create(
+            full_name="Ana Torres",
+            email="ana@example.com",
+            subject="Consulta",
+            message="Información sobre MOVIX.",
+        )
         urls = [
             reverse("panel:profile_detail", args=["users", self.user_profile.id]),
             reverse("panel:profile_detail", args=["drivers", self.driver_profile.id]),
@@ -218,6 +277,8 @@ class PanelIntegrationTests(TransactionTestCase):
             reverse("panel:advertisements"),
             reverse("panel:admin_profile"),
             reverse("panel:settings"),
+            reverse("panel:contact_request_list"),
+            reverse("panel:contact_request_detail", args=[contact.id]),
             reverse("panel:search") + "?q=María",
         ]
         for url in urls:

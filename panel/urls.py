@@ -6,8 +6,12 @@ from . import views
 app_name = "panel"
 
 urlpatterns = [
-    path("", views.dashboard, name="dashboard"),
+    path("", views.landing, name="landing"),
+    path("administracion/", views.dashboard, name="dashboard"),
     path("buscar/", views.global_search, name="search"),
+    path("solicitudes/", views.contact_request_list, name="contact_request_list"),
+    path("solicitudes/<uuid:request_id>/", views.contact_request_detail, name="contact_request_detail"),
+    path("solicitudes/<uuid:request_id>/estado/<str:status>/", views.contact_request_status, name="contact_request_status"),
     path("personas/<str:kind>/", views.profile_list, name="profile_list"),
     path("personas/<str:kind>/nuevo/", views.profile_create, name="profile_create"),
     path("personas/<str:kind>/exportar/", views.profile_export, name="profile_export"),

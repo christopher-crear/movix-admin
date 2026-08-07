@@ -5,4 +5,5 @@ python-dotenv>=1.0,<2
 whitenoise[brotli]>=6.8,<7
 gunicorn>=23,<24
 requests>=2.32,<3
+Pillow>=11.1,<13
 firebase-admin>=6.6,<8

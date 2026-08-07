@@ -6,6 +6,11 @@ El sistema utiliza las tablas existentes de la app móvil (`profiles`, `rides`, 
 
 ## Funciones incluidas
 
+- Página pública promocional de MOVIX en `/`, optimizada para escritorio y móvil.
+- Animaciones suaves en tarjetas, teléfono flotante y secciones al hacer scroll.
+- Información enfocada en transporte de carga liviana en Loja, Ecuador.
+- Formulario público protegido con CSRF, campo trampa y límite básico por IP.
+- Módulo **Solicitudes** para buscar, leer, responder, cerrar y dar seguimiento a contactos.
 - Inicio de sesión exclusivo para cuentas Django con `is_staff=True`.
 - Dashboard con contadores y gráficos calculados desde la base real.
 - Usuarios y transportistas separados según el campo `profiles.role`.
@@ -85,6 +90,12 @@ python manage.py migrate
 python manage.py createsuperuser
 ```
 
+La migración `panel/0002_contactrequest` crea automáticamente
+`public.contact_requests`, donde se almacenan las consultas de la landing. No
+debes crearla manualmente si `migrate` terminó correctamente. El archivo
+`sql/contact_requests.sql` queda incluido como alternativa para instalaciones
+en las que el esquema se gestione exclusivamente desde Supabase SQL Editor.
+
 La cuenta creada con `createsuperuser` es la que permite entrar al panel. Los clientes y transportistas no pueden iniciar sesión aquí.
 
 Ejecuta:
@@ -93,7 +104,8 @@ Ejecuta:
 python manage.py runserver
 ```
 
-Abre `http://127.0.0.1:8000/login/`.
+Abre `http://127.0.0.1:8000/` para ver la página pública y
+`http://127.0.0.1:8000/login/` para entrar al panel.
 
 ## 4. Archivos y Supabase Storage
 
@@ -176,6 +188,7 @@ Render ejecuta automáticamente instalación, archivos estáticos, migraciones y
 | Publicidad | `advertisements` |
 | Auditoría | `admin_audit_logs` |
 | Configuración | `admin_settings` |
+| Solicitudes de la página pública | `contact_requests` |
 
 ## Seguridad
 

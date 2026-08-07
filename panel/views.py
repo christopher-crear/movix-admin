@@ -2,6 +2,7 @@ import csv
 import json
 import uuid
 from datetime import datetime
+from urllib.parse import quote
 
 import requests
 from django.contrib import messages
@@ -24,7 +25,9 @@ from .decorators import admin_required
 from .forms import (
     AdminProfileForm,
     AdvertisementForm,
+    ContactResponseForm,
     NotificationForm,
+    PublicContactForm,
     ProfileCreateForm,
     ProfileForm,
     SettingsForm,
@@ -33,6 +36,7 @@ from .models import (
     AdminProfile,
     Advertisement,
     AuditLog,
+    ContactRequest,
     DriverReview,
     Notification,
     NotificationCampaign,
@@ -68,6 +72,109 @@ REVERIFICATION_FIELDS = {
     "identification_number", "license_number", "vehicle_plate", "vehicle_year",
     "vehicle_type", "identification_file", "license_file", "registration_file", "insurance_file",
 }
+
+
+def landing(request):
+    """Página pública de presentación de MOVIX y recepción de solicitudes."""
+    form = PublicContactForm(request.POST or None)
+    if request.method == "POST":
+        forwarded = request.META.get("HTTP_X_FORWARDED_FOR", "")
+        ip_address = forwarded.split(",")[0].strip() if forwarded else request.META.get("REMOTE_ADDR")
+        rate_key = f"movix-public-contact:{ip_address or 'unknown'}"
+        attempts = int(cache.get(rate_key, 0))
+        if attempts >= 5:
+            form.add_error(None, "Has enviado varias solicitudes. Espera unos minutos antes de intentarlo otra vez.")
+        elif form.is_valid():
+            contact = form.save(commit=False)
+            contact.ip_address = ip_address or None
+            contact.user_agent = request.META.get("HTTP_USER_AGENT", "")[:300]
+            contact.save()
+            cache.set(rate_key, attempts + 1, 600)
+            cache.delete("movix-new-contact-count")
+            return redirect(f"{reverse('panel:landing')}?enviado=1#contacto")
+    return render(request, "landing.html", {"contact_form": form})
+
+
+@admin_required
+def contact_request_list(request):
+    queryset = ContactRequest.objects.all()
+    query = request.GET.get("q", "").strip()
+    status = request.GET.get("status", "all")
+    if query:
+        queryset = queryset.filter(
+            Q(full_name__icontains=query)
+            | Q(email__icontains=query)
+            | Q(phone__icontains=query)
+            | Q(subject__icontains=query)
+            | Q(message__icontains=query)
+        )
+    if status in dict(ContactRequest.STATUS_CHOICES):
+        queryset = queryset.filter(status=status)
+    counts = ContactRequest.objects.aggregate(
+        total=Count("id"),
+        new=Count("id", filter=Q(status=ContactRequest.STATUS_NEW)),
+        read=Count("id", filter=Q(status=ContactRequest.STATUS_READ)),
+        responded=Count("id", filter=Q(status=ContactRequest.STATUS_RESPONDED)),
+        closed=Count("id", filter=Q(status=ContactRequest.STATUS_CLOSED)),
+    )
+    page = Paginator(queryset, 15).get_page(request.GET.get("page"))
+    return render(
+        request,
+        "panel/contact_request_list.html",
+        {"page": page, "query": query, "status": status, "counts": counts},
+    )
+
+
+@admin_required
+def contact_request_detail(request, request_id):
+    contact = get_object_or_404(ContactRequest, pk=request_id)
+    if contact.status == ContactRequest.STATUS_NEW:
+        contact.status = ContactRequest.STATUS_READ
+        contact.save(update_fields=["status", "updated_at"])
+        cache.delete("movix-new-contact-count")
+
+    form = ContactResponseForm(request.POST or None, instance=contact)
+    if request.method == "POST" and form.is_valid():
+        contact = form.save(commit=False)
+        contact.status = ContactRequest.STATUS_RESPONDED
+        contact.responded_by = request.user.get_full_name() or request.user.username
+        contact.responded_at = timezone.now()
+        contact.save()
+        cache.delete("movix-new-contact-count")
+        audit(request, "respond", "contact_request", f"Respondió la solicitud de {contact.full_name}", contact.id)
+        messages.success(request, "Respuesta guardada. Ya puedes abrir tu correo para enviarla al contacto.")
+        return redirect("panel:contact_request_detail", request_id=contact.id)
+
+    response_text = contact.admin_response or (
+        f"Hola {contact.full_name},\n\nGracias por comunicarte con MOVIX. "
+        "Hemos recibido tu solicitud y queremos ayudarte.\n\n"
+    )
+    email_body = response_text + "\n\nSaludos,\nEquipo MOVIX · Loja, Ecuador"
+    mailto_url = (
+        f"mailto:{quote(contact.email, safe='@.')}"
+        f"?subject={quote('Respuesta MOVIX: ' + contact.subject)}"
+        f"&body={quote(email_body)}"
+    )
+    return render(
+        request,
+        "panel/contact_request_detail.html",
+        {"contact": contact, "form": form, "mailto_url": mailto_url},
+    )
+
+
+@admin_required
+@require_POST
+def contact_request_status(request, request_id, status):
+    contact = get_object_or_404(ContactRequest, pk=request_id)
+    allowed = dict(ContactRequest.STATUS_CHOICES)
+    if status not in allowed:
+        raise Http404("Estado no válido")
+    contact.status = status
+    contact.save(update_fields=["status", "updated_at"])
+    cache.delete("movix-new-contact-count")
+    audit(request, "status", "contact_request", f"Marcó la solicitud como {allowed[status].lower()}", contact.id)
+    messages.success(request, f"Solicitud marcada como {allowed[status].lower()}.")
+    return redirect("panel:contact_request_detail", request_id=contact.id)
 
 
 def _role_q(roles):

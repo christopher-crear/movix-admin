@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+{% block title %}Solicitud de {{ contact.full_name }}{% endblock %}
+{% block content %}
+<div class="breadcrumb-actions page-back"><a class="back-link" href="{% url 'panel:contact_request_list' %}"><svg><use href="#i-arrow"/></svg> Solicitudes</a><span class="pill {% if contact.status == 'new' %}pill-yellow{% elif contact.status == 'responded' %}pill-green{% elif contact.status == 'closed' %}pill-red{% else %}pill-blue{% endif %}">{{ contact.status_label }}</span></div>
+
+<section class="contact-detail-hero card">
+    <div class="contact-detail-person"><span class="avatar avatar-xl contact-avatar">{{ contact.initials }}</span><div><span class="eyebrow">{{ contact.get_request_type_display }}</span><h1>{{ contact.full_name }}</h1><p>{{ contact.subject }}</p></div></div>
+    <div class="contact-detail-meta"><span><svg><use href="#i-clock"/></svg><b>Recibida</b>{{ contact.created_at|date:'d/m/Y · H:i' }}</span><span><svg><use href="#i-inbox"/></svg><b>Estado</b>{{ contact.status_label }}</span></div>
+</section>
+
+<div class="contact-admin-grid">
+    <div class="contact-admin-main">
+        <article class="card contact-message-card"><header><div><span class="eyebrow">MENSAJE ORIGINAL</span><h2>{{ contact.subject }}</h2></div><span>{{ contact.created_at|timesince }} atrás</span></header><div class="contact-message-body">{{ contact.message|linebreaksbr }}</div></article>
+        <article class="card contact-response-card"><div class="section-heading"><h2><svg><use href="#i-mail"/></svg> Preparar respuesta</h2><p>Guarda la respuesta para conservar el historial administrativo.</p></div><form method="post" class="stack-form">{% csrf_token %}<div class="field"><label for="{{ form.admin_response.id_for_label }}">{{ form.admin_response.label }}</label>{{ form.admin_response }}{{ form.admin_response.errors }}</div><div class="response-actions"><button class="btn btn-primary" type="submit"><svg><use href="#i-check"/></svg> Guardar respuesta</button>{% if contact.admin_response %}<a class="btn btn-success" href="{{ mailto_url }}"><svg><use href="#i-mail"/></svg> Abrir correo para enviar</a>{% endif %}</div></form>{% if not contact.admin_response %}<p class="response-hint">Después de guardar aparecerá el botón para abrir tu correo con el destinatario, asunto y respuesta ya preparados.</p>{% endif %}</article>
+    </div>
+    <aside class="contact-admin-side">
+        <article class="card contact-info-card"><h2>Datos de contacto</h2><dl><div><dt>Correo electrónico</dt><dd><a href="mailto:{{ contact.email }}">{{ contact.email }}</a></dd></div><div><dt>Teléfono</dt><dd>{% if contact.phone %}<a href="tel:{{ contact.phone }}">{{ contact.phone }}</a>{% else %}No proporcionado{% endif %}</dd></div><div><dt>Tipo de solicitud</dt><dd>{{ contact.get_request_type_display }}</dd></div>{% if contact.responded_by %}<div><dt>Respondida por</dt><dd>{{ contact.responded_by }} · {{ contact.responded_at|date:'d/m/Y H:i' }}</dd></div>{% endif %}</dl></article>
+        <article class="card contact-status-card"><h2>Administrar estado</h2><p>Organiza el seguimiento de esta solicitud.</p><div class="status-actions"><form method="post" action="{% url 'panel:contact_request_status' contact.id 'read' %}">{% csrf_token %}<button class="btn btn-secondary btn-block" type="submit"><svg><use href="#i-eye"/></svg> Marcar como leída</button></form><form method="post" action="{% url 'panel:contact_request_status' contact.id 'closed' %}">{% csrf_token %}<button class="btn btn-secondary btn-block" type="submit"><svg><use href="#i-check"/></svg> Cerrar solicitud</button></form>{% if contact.status == 'closed' %}<form method="post" action="{% url 'panel:contact_request_status' contact.id 'read' %}">{% csrf_token %}<button class="btn btn-primary btn-block" type="submit">Reabrir solicitud</button></form>{% endif %}</div></article>
+    </aside>
+</div>
+{% endblock %}

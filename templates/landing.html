@@ -1,0 +1,201 @@
+{% load static %}
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="MOVIX conecta personas y transportistas de carga liviana en Loja, Ecuador. Solicita camionetas y camiones de forma rápida, segura y confiable.">
+    <meta name="theme-color" content="#071d3d">
+    <title>MOVIX · Transporte de carga en Loja</title>
+    <link rel="icon" href="{% static 'img/logo-mark.svg' %}" type="image/svg+xml">
+    <link rel="stylesheet" href="{% static 'css/landing.css' %}">
+</head>
+<body>
+<header class="landing-header" data-header>
+    <div class="landing-container nav-wrap">
+        <a class="landing-brand" href="#inicio" aria-label="MOVIX, ir al inicio">
+            <img src="{% static 'img/logo-mark.svg' %}" alt="Logo MOVIX">
+            <span><strong>MOVIX</strong><small>Tu carga, nuestro camino</small></span>
+        </a>
+        <button class="mobile-nav-button" type="button" data-nav-toggle aria-label="Abrir menú" aria-expanded="false">
+            <span></span><span></span><span></span>
+        </button>
+        <nav class="landing-nav" data-nav aria-label="Navegación principal">
+            <a href="#servicios">Servicios</a>
+            <a href="#como-funciona">Cómo funciona</a>
+            <a href="#seguridad">Seguridad</a>
+            <a href="#conductores">Conductores</a>
+            <a href="#preguntas">Preguntas</a>
+            <a href="#contacto">Contacto</a>
+            <a class="nav-admin" href="{% url 'login' %}">Panel administrativo</a>
+        </nav>
+    </div>
+</header>
+
+<main>
+    <section class="hero" id="inicio">
+        <div class="hero-glow hero-glow-one"></div><div class="hero-glow hero-glow-two"></div>
+        <div class="landing-container hero-grid">
+            <div class="hero-copy reveal">
+                <div class="location-badge"><span>●</span> Hecho para Loja, Ecuador</div>
+                <h1>Transporta lo que necesites de forma <em>rápida, segura y confiable.</em></h1>
+                <p>MOVIX conecta a personas y empresas con transportistas verificados para mudanzas, entregas, fletes y todo tipo de carga liviana dentro de Loja.</p>
+                <div class="hero-actions">
+                    <a class="landing-btn landing-btn-primary" href="#contacto">Solicitar información <span>→</span></a>
+                    <a class="landing-btn landing-btn-ghost" href="#como-funciona"><span class="play-dot">▶</span> Ver cómo funciona</a>
+                </div>
+                <div class="hero-proof">
+                    <div class="proof-avatars"><i>MG</i><i>RE</i><i>CV</i><i>+99</i></div>
+                    <div><strong>Transporte local confiable</strong><span>Conductores y documentos verificados</span></div>
+                </div>
+            </div>
+
+            <div class="phone-scene reveal" data-phone-scene aria-label="Vista previa de la aplicación MOVIX">
+                <span class="orbit orbit-one"></span><span class="orbit orbit-two"></span>
+                <div class="floating-chip chip-location"><b>12 min</b><small>Transportista cerca</small></div>
+                <div class="floating-chip chip-safe"><span>✓</span><div><b>Viaje protegido</b><small>Perfil verificado</small></div></div>
+                <div class="phone-shadow"></div>
+                <div class="phone" data-floating-phone>
+                    <div class="phone-speaker"></div>
+                    <div class="phone-screen">
+                        <div class="phone-status"><span>9:41</span><span>● ◔</span></div>
+                        <div class="phone-appbar"><img src="{% static 'img/logo-mark.svg' %}" alt=""><div><b>Hola, María</b><small>¿Qué necesitas mover?</small></div><i>•••</i></div>
+                        <div class="mini-map">
+                            <span class="map-road road-a"></span><span class="map-road road-b"></span><span class="map-road road-c"></span>
+                            <div class="map-point point-a"><i></i></div><div class="map-point point-b"><i></i></div>
+                            <div class="route-line"></div><div class="mini-truck">▣</div>
+                        </div>
+                        <div class="phone-panel">
+                            <span class="phone-kicker">NUEVA SOLICITUD</span>
+                            <h3>Transporte en Loja</h3>
+                            <div class="route-field"><i>●</i><span><small>Recoger en</small><b>El Valle, Loja</b></span></div>
+                            <div class="route-field"><i>◆</i><span><small>Entregar en</small><b>Ciudadela Zamora</b></span></div>
+                            <button type="button">Encontrar transportista</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="hero-wave"></div>
+    </section>
+
+    <section class="section section-soft" id="servicios">
+        <div class="landing-container">
+            <header class="section-head reveal"><span>PARA CADA NECESIDAD</span><h2>Una nueva forma de transportar tu carga</h2><p>Elige el servicio que se adapte a lo que quieres mover en la ciudad de Loja.</p></header>
+            <div class="purpose-grid">
+                <article class="purpose-card warm reveal" data-tilt><div class="feature-icon">⌂</div><h3>Mudanzas sin estrés</h3><p>Traslada muebles, electrodomésticos y cajas con el vehículo adecuado.</p><a href="#contacto">Planificar mudanza →</a></article>
+                <article class="purpose-card mint reveal" data-tilt><div class="feature-icon">▣</div><h3>Envíos para negocios</h3><p>Entrega productos, mercadería e insumos a tus clientes con confianza.</p><a href="#contacto">Hablar con MOVIX →</a></article>
+                <article class="purpose-card blue reveal" data-tilt><div class="feature-icon">↗</div><h3>Fletes dentro de Loja</h3><p>Solicita transporte rápido para cargas puntuales, compras y entregas.</p><a href="#contacto">Solicitar información →</a></article>
+            </div>
+        </div>
+    </section>
+
+    <section class="section">
+        <div class="landing-container">
+            <header class="section-head reveal"><span>SERVICIOS MOVIX</span><h2>¿Qué puedes transportar con MOVIX?</h2><p>Soluciones flexibles para personas, emprendimientos y empresas locales.</p></header>
+            <div class="service-grid">
+                <article class="service-card reveal" data-tilt><i>▤</i><h3>Muebles y hogar</h3><p>Sofás, camas, mesas y artículos voluminosos.</p></article>
+                <article class="service-card reveal" data-tilt><i>▦</i><h3>Electrodomésticos</h3><p>Refrigeradoras, cocinas, lavadoras y equipos.</p></article>
+                <article class="service-card reveal" data-tilt><i>⬡</i><h3>Materiales</h3><p>Material de obra, herramientas e insumos.</p></article>
+                <article class="service-card reveal" data-tilt><i>▧</i><h3>Mercadería</h3><p>Productos y pedidos para tu emprendimiento.</p></article>
+                <article class="service-card reveal" data-tilt><i>♧</i><h3>Eventos</h3><p>Equipos, decoración, mobiliario y suministros.</p></article>
+                <article class="service-card reveal" data-tilt><i>⌁</i><h3>Carga personalizada</h3><p>Cuéntanos qué necesitas y buscamos la opción ideal.</p></article>
+            </div>
+        </div>
+    </section>
+
+    <section class="section section-soft" id="como-funciona">
+        <div class="landing-container split-section">
+            <div class="steps-copy reveal">
+                <span class="section-label">SIMPLE Y RÁPIDO</span><h2>¿Cómo funciona para los usuarios?</h2><p>Desde tu teléfono puedes solicitar el transporte que necesitas en pocos pasos.</p>
+                <ol class="steps-list">
+                    <li><b>1</b><div><h3>Indica origen y destino</h3><p>Selecciona en el mapa dónde recogemos y entregamos tu carga.</p></div></li>
+                    <li><b>2</b><div><h3>Describe lo que transportarás</h3><p>Elige el tipo de vehículo, carga y si necesitas ayudantes.</p></div></li>
+                    <li><b>3</b><div><h3>Conecta con un transportista</h3><p>Un conductor disponible acepta la solicitud y se dirige hacia ti.</p></div></li>
+                    <li><b>4</b><div><h3>Sigue tu servicio</h3><p>Recibe actualizaciones y califica la experiencia al finalizar.</p></div></li>
+                </ol>
+            </div>
+            <div class="route-showcase reveal" data-tilt>
+                <div class="route-top"><span>Servicio en curso</span><b>En camino</b></div>
+                <div class="loja-map"><span>LOJA</span><i class="route-dot one"></i><i class="route-dot two"></i><i class="route-path"></i><strong>🚚</strong></div>
+                <div class="driver-strip"><span class="driver-avatar">RE</span><div><b>Rafael · Transportista</b><small>Camioneta · Perfil verificado</small></div><em>4.9 ★</em></div>
+            </div>
+        </div>
+    </section>
+
+    <section class="section" id="seguridad">
+        <div class="landing-container">
+            <header class="section-head reveal"><span>CONFIANZA EN CADA VIAJE</span><h2>Tu seguridad es nuestra prioridad</h2><p>MOVIX incorpora controles para crear una comunidad más confiable.</p></header>
+            <div class="security-layout">
+                <div class="security-list reveal">
+                    <article><i>✓</i><div><h3>Transportistas verificados</h3><p>Revisión administrativa de identidad, licencia, matrícula y seguro vehicular.</p></div></article>
+                    <article><i>⌖</i><div><h3>Ubicaciones claras</h3><p>Origen y destino definidos para mantener organizada cada solicitud.</p></div></article>
+                    <article><i>★</i><div><h3>Calificaciones reales</h3><p>La comunidad puede valorar el servicio y compartir su experiencia.</p></div></article>
+                    <article><i>♢</i><div><h3>Control administrativo</h3><p>Perfiles, documentos, bloqueos y novedades gestionados desde MOVIX.</p></div></article>
+                </div>
+                <div class="trust-card reveal" data-tilt><div class="trust-shield">✓</div><span>PROTECCIÓN MOVIX</span><h3>Personas reales.<br>Documentos revisados.</h3><p>Cada transportista puede mostrar su estado de verificación antes del servicio.</p><div class="trust-meter"><i></i></div><small>Seguridad pensada para nuestra ciudad</small></div>
+            </div>
+        </div>
+    </section>
+
+    <section class="driver-section" id="conductores">
+        <div class="landing-container driver-grid">
+            <div class="driver-copy reveal"><span>CRECE CON NOSOTROS</span><h2>Genera ingresos transportando con MOVIX</h2><p>Si tienes una camioneta o camión y quieres trabajar de manera independiente en Loja, MOVIX puede conectarte con personas que necesitan tus servicios.</p><ul><li>Administra tu disponibilidad</li><li>Recibe solicitudes cercanas</li><li>Construye tu reputación</li><li>Forma parte de una red local</li></ul><a class="landing-btn landing-btn-primary" href="#contacto" data-contact-type="driver">Quiero ser transportista →</a></div>
+            <div class="driver-visual reveal"><div class="truck-window"><div class="city-lines"></div><span class="truck-figure">🚚</span></div><div class="earning-card"><small>Oportunidades locales</small><strong>Trabaja a tu ritmo</strong><span>Loja · Ecuador</span></div></div>
+        </div>
+    </section>
+
+    <section class="section">
+        <div class="landing-container business-grid">
+            <div class="business-card reveal" data-tilt><div class="business-art"><span>📦</span><i></i></div><div><span class="section-label">PARA TU NEGOCIO</span><h2>Transporta lo que tu empresa necesita</h2><p>Coordina entregas de productos, mercadería e insumos con una solución local.</p><div class="business-tags"><span>Emprendimientos</span><span>Tiendas</span><span>Restaurantes</span><span>Construcción</span></div><a href="#contacto" data-contact-type="company">Consultar convenio →</a></div></div>
+            <div class="payment-card reveal"><span class="section-label">PAGOS FLEXIBLES</span><h2>Métodos de pago</h2><p>Elige la alternativa disponible que mejor se adapte al servicio.</p><div class="payment-options"><article><i>$</i><div><b>Efectivo</b><small>Pago directo al finalizar</small></div></article><article><i>▤</i><div><b>Transferencia</b><small>Desde tu entidad bancaria</small></div></article></div></div>
+        </div>
+    </section>
+
+    <section class="cta-section">
+        <div class="landing-container reveal"><span>MOVIX · LOJA</span><h2>Tu próximo transporte comienza aquí</h2><p>Descubre una manera más sencilla de mover tu carga en nuestra ciudad.</p><div><a class="landing-btn landing-btn-light" href="#contacto">Quiero información</a><a class="landing-btn landing-btn-outline" href="#conductores">Trabajar con MOVIX</a></div></div>
+    </section>
+
+    <section class="section" id="preguntas">
+        <div class="landing-container faq-wrap">
+            <header class="section-head reveal"><span>RESOLVEMOS TUS DUDAS</span><h2>Preguntas frecuentes</h2></header>
+            <div class="faq-list reveal">
+                <details><summary>¿En qué ciudad funciona MOVIX?<i>+</i></summary><p>MOVIX está pensado inicialmente para conectar usuarios y transportistas dentro de Loja, Ecuador.</p></details>
+                <details><summary>¿Qué tipo de carga puedo transportar?<i>+</i></summary><p>Muebles, electrodomésticos, mercadería, materiales, equipos y otras cargas livianas compatibles con camionetas o camiones.</p></details>
+                <details><summary>¿Cómo verifican a los transportistas?<i>+</i></summary><p>El administrador revisa información personal, licencia, matrícula, seguro y documentos de identidad antes de aprobar el perfil.</p></details>
+                <details><summary>¿Puedo trabajar como transportista?<i>+</i></summary><p>Sí. Envíanos tus datos desde el formulario indicando “Quiero trabajar con MOVIX” y nuestro equipo revisará tu solicitud.</p></details>
+                <details><summary>¿MOVIX define el valor del transporte?<i>+</i></summary><p>La aplicación facilita la solicitud y coordinación. Las condiciones finales se muestran y confirman durante el proceso del servicio.</p></details>
+            </div>
+        </div>
+    </section>
+
+    <section class="contact-section" id="contacto">
+        <div class="landing-container contact-grid">
+            <div class="contact-copy reveal"><span>HABLEMOS</span><h2>¿Tienes alguna consulta?</h2><p>Escríbenos. Tu solicitud se enviará directamente al equipo administrativo de MOVIX.</p><div class="contact-detail"><i>@</i><div><b>Atención MOVIX</b><small>Respondemos desde nuestro panel administrativo</small></div></div><div class="contact-detail"><i>⌖</i><div><b>Loja, Ecuador</b><small>Transporte local de carga liviana</small></div></div></div>
+            <form class="public-contact-form reveal" method="post" action="{% url 'panel:landing' %}#contacto" novalidate data-contact-form>
+                {% csrf_token %}
+                {{ contact_form.website }}
+                {% if request.GET.enviado == '1' %}<div class="contact-success" role="status"><b>✓ Solicitud recibida</b><span>Gracias por escribirnos. El equipo MOVIX podrá revisarla desde el panel administrativo.</span></div>{% endif %}
+                {% if contact_form.non_field_errors %}<div class="contact-error">{{ contact_form.non_field_errors }}</div>{% endif %}
+                <div class="contact-form-grid">
+                    <label><span>{{ contact_form.full_name.label }}</span>{{ contact_form.full_name }}{{ contact_form.full_name.errors }}</label>
+                    <label><span>{{ contact_form.email.label }}</span>{{ contact_form.email }}{{ contact_form.email.errors }}</label>
+                    <label><span>{{ contact_form.phone.label }}</span>{{ contact_form.phone }}{{ contact_form.phone.errors }}</label>
+                    <label><span>{{ contact_form.request_type.label }}</span>{{ contact_form.request_type }}{{ contact_form.request_type.errors }}</label>
+                    <label class="full"><span>{{ contact_form.subject.label }}</span>{{ contact_form.subject }}{{ contact_form.subject.errors }}</label>
+                    <label class="full"><span>{{ contact_form.message.label }}</span>{{ contact_form.message }}<small class="char-counter"><b data-message-count>0</b>/2000</small>{{ contact_form.message.errors }}</label>
+                </div>
+                <label class="privacy-check">{{ contact_form.privacy_accepted }}<span>{{ contact_form.privacy_accepted.label }}</span></label>{{ contact_form.privacy_accepted.errors }}
+                <button class="landing-btn landing-btn-primary contact-submit" type="submit" data-submit-text="Enviando solicitud...">Enviar solicitud <span>→</span></button>
+            </form>
+        </div>
+    </section>
+</main>
+
+<footer class="landing-footer">
+    <div class="landing-container footer-grid"><div><a class="landing-brand" href="#inicio"><img src="{% static 'img/logo-mark.svg' %}" alt=""><span><strong>MOVIX</strong><small>Tu carga, nuestro camino</small></span></a><p>Conectando a Loja con una nueva forma de transportar carga liviana.</p></div><div><b>Explora</b><a href="#servicios">Servicios</a><a href="#como-funciona">Cómo funciona</a><a href="#seguridad">Seguridad</a></div><div><b>Comunidad</b><a href="#conductores">Ser transportista</a><a href="#contacto">Contacto</a><a href="{% url 'login' %}">Administradores</a></div><div><b>Ubicación</b><span>Loja, Ecuador</span><span>Servicio de carga liviana</span></div></div>
+    <div class="landing-container footer-bottom"><span>© {% now 'Y' %} MOVIX. Todos los derechos reservados.</span><span>Diseñado para mover Loja</span></div>
+</footer>
+<script src="{% static 'js/landing.js' %}"></script>
+</body>
+</html>

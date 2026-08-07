@@ -264,3 +264,61 @@ class AdminProfile(models.Model):
 
     def __str__(self):
         return self.user.get_full_name() or self.user.username
+
+
+class ContactRequest(models.Model):
+    """Solicitud enviada desde la página pública de MOVIX."""
+
+    STATUS_NEW = "new"
+    STATUS_READ = "read"
+    STATUS_RESPONDED = "responded"
+    STATUS_CLOSED = "closed"
+    STATUS_CHOICES = [
+        (STATUS_NEW, "Nueva"),
+        (STATUS_READ, "Leída"),
+        (STATUS_RESPONDED, "Respondida"),
+        (STATUS_CLOSED, "Cerrada"),
+    ]
+    TYPE_CHOICES = [
+        ("service", "Solicitar un transporte"),
+        ("driver", "Quiero trabajar con MOVIX"),
+        ("company", "Convenio para empresa"),
+        ("support", "Ayuda o soporte"),
+        ("other", "Otra consulta"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    full_name = models.CharField(max_length=160)
+    email = models.EmailField(max_length=254)
+    phone = models.CharField(max_length=30, blank=True)
+    request_type = models.CharField(max_length=30, choices=TYPE_CHOICES, default="service")
+    subject = models.CharField(max_length=180)
+    message = models.TextField(max_length=2000)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_NEW)
+    admin_response = models.TextField(max_length=4000, blank=True)
+    responded_by = models.CharField(max_length=150, blank=True)
+    responded_at = models.DateTimeField(blank=True, null=True)
+    ip_address = models.GenericIPAddressField(blank=True, null=True)
+    user_agent = models.CharField(max_length=300, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "contact_requests"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["status", "-created_at"], name="contact_status_created_idx"),
+            models.Index(fields=["email"], name="contact_email_idx"),
+        ]
+
+    @property
+    def status_label(self):
+        return dict(self.STATUS_CHOICES).get(self.status, self.status)
+
+    @property
+    def initials(self):
+        parts = [part for part in self.full_name.split() if part]
+        return "".join(part[0].upper() for part in parts[:2]) or "MV"
+
+    def __str__(self):
+        return f"{self.full_name} · {self.subject}"
