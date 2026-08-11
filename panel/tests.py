@@ -6,6 +6,7 @@ from django.contrib.auth.models import User
 from django import forms
 from django.core import signing
 from django.core.cache import cache
+from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection
 from django.test import Client, SimpleTestCase, TransactionTestCase
@@ -423,6 +424,45 @@ class PanelIntegrationTests(TransactionTestCase):
         self.assertRedirects(response, reverse("panel:driver_dashboard"), fetch_redirect_response=False)
         self.assertEqual(self.client.session["portal_profile_id"], str(self.driver_profile.id))
         self.assertEqual(self.client.session["portal_role"], "transportista")
+        sign_in.assert_called_once_with(self.driver_profile.email, "ClaveSegura123")
+
+    def test_admin_can_login_normally_with_django_username_and_password(self):
+        self.client.logout()
+
+        response = self.client.post(
+            reverse("login"),
+            {"username": "admin_movix", "password": "PruebaSegura123"},
+        )
+
+        self.assertRedirects(response, reverse("panel:dashboard"), fetch_redirect_response=False)
+        self.assertEqual(int(self.client.session["_auth_user_id"]), self.admin.pk)
+
+    def test_admin_username_rejects_an_incorrect_password(self):
+        self.client.logout()
+
+        response = self.client.post(
+            reverse("login"),
+            {"username": "admin_movix", "password": "ClaveIncorrecta"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Usuario o contraseña incorrectos")
+        self.assertNotIn("_auth_user_id", self.client.session)
+
+    @patch("panel.views.supabase_password_sign_in")
+    def test_driver_email_rejects_an_incorrect_password(self, sign_in):
+        self.client.logout()
+        sign_in.side_effect = ValidationError("Invalid login credentials")
+
+        response = self.client.post(
+            reverse("login"),
+            {"username": self.driver_profile.email, "password": "ClaveIncorrecta"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Correo o contraseña incorrectos")
+        self.assertNotIn("portal_profile_id", self.client.session)
+        sign_in.assert_called_once_with(self.driver_profile.email, "ClaveIncorrecta")
 
     @patch("panel.views.supabase_password_sign_in")
     def test_driver_role_wins_when_email_is_also_used_by_django_staff(self, sign_in):

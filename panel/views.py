@@ -345,10 +345,14 @@ def _portal_profile_from_auth(request, auth_user, auth_payload):
 
 def access_login(request):
     """Login único: administradores Django y cuentas reales de Supabase."""
-    if request.user.is_authenticated and request.user.is_staff:
-        return redirect("panel:dashboard")
-    if request.session.get("portal_profile_id"):
-        return redirect("panel:driver_dashboard")
+    # En una visita normal evitamos mostrar el formulario a quien ya inició
+    # sesión. En un POST, en cambio, siempre validamos las credenciales
+    # recibidas: una sesión anterior nunca debe hacer que se ignore la clave.
+    if request.method != "POST":
+        if request.user.is_authenticated and request.user.is_staff:
+            return redirect("panel:dashboard")
+        if request.session.get("portal_profile_id"):
+            return redirect("panel:driver_dashboard")
 
     google_callback = request.build_absolute_uri(reverse("panel:auth_callback"))
     google_url = ""
@@ -358,6 +362,25 @@ def access_login(request):
     if request.method == "POST":
         identifier = request.POST.get("username", "").strip()
         password = request.POST.get("password", "")
+
+        if not identifier or not password:
+            messages.error(request, "Escribe el usuario o correo y la contraseña.")
+            return render(request, "registration/login.html", {"google_url": google_url})
+
+        # El nombre de usuario (sin @) pertenece exclusivamente al acceso
+        # administrativo de Django. Aquí Django comprueba usuario y clave; no
+        # se consulta Supabase ni se intenta adivinar el rol por el correo.
+        if "@" not in identifier:
+            django_user = authenticate(request, username=identifier, password=password)
+            if django_user and django_user.is_active and django_user.is_staff:
+                request.session.pop("portal_profile_id", None)
+                request.session.pop("portal_role", None)
+                request.session.pop("portal_access_token", None)
+                request.session.pop("portal_refresh_token", None)
+                django_login(request, django_user)
+                return redirect(request.POST.get("next") or "panel:dashboard")
+            messages.error(request, "Usuario o contraseña incorrectos.")
+            return render(request, "registration/login.html", {"google_url": google_url})
 
         # Si el correo pertenece a un transportista activo, se valida primero
         # contra Supabase. Así un correo repetido en auth_user de Django no
@@ -377,8 +400,8 @@ def access_login(request):
                 payload = supabase_password_sign_in(identifier, password)
                 destination = _portal_profile_from_auth(request, payload.get("user") or {}, payload)
                 return redirect(destination)
-            except (ValidationError, DatabaseError) as exc:
-                messages.error(request, str(exc))
+            except (ValidationError, DatabaseError):
+                messages.error(request, "Correo o contraseña incorrectos.")
             return render(request, "registration/login.html", {"google_url": google_url})
 
         # Mantiene compatible el acceso creado con `createsuperuser`.
@@ -393,15 +416,12 @@ def access_login(request):
             return redirect(request.POST.get("next") or "panel:dashboard")
 
         # Para usuarios de la app, el identificador debe ser el correo real.
-        if "@" not in identifier:
-            messages.error(request, "Para ingresar como transportista escribe el correo registrado en MOVIX.")
-        else:
-            try:
-                payload = supabase_password_sign_in(identifier, password)
-                destination = _portal_profile_from_auth(request, payload.get("user") or {}, payload)
-                return redirect(destination)
-            except (ValidationError, DatabaseError) as exc:
-                messages.error(request, str(exc))
+        try:
+            payload = supabase_password_sign_in(identifier, password)
+            destination = _portal_profile_from_auth(request, payload.get("user") or {}, payload)
+            return redirect(destination)
+        except (ValidationError, DatabaseError):
+            messages.error(request, "Correo o contraseña incorrectos.")
 
     return render(request, "registration/login.html", {"google_url": google_url})
 
