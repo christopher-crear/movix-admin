@@ -1,3 +1,4 @@
+import base64
 import json
 import mimetypes
 import uuid
@@ -499,7 +500,7 @@ def build_monthly_invoice_pdf(invoice):
 
 
 def send_movix_email(recipient, subject, body, attachment_name=None, attachment_bytes=None):
-    """Envía correo SMTP y permite adjuntar la factura generada."""
+    """Envía por Brevo HTTPS o SMTP y permite adjuntar una factura PDF."""
     if not recipient:
         return False, "El transportista no tiene correo registrado."
     html = (
@@ -509,11 +510,49 @@ def send_movix_email(recipient, subject, body, attachment_name=None, attachment_
         f'<p style="line-height:1.6">{html_escape(str(body)).replace(chr(10), "<br>")}</p>'
         '<p style="color:#71809a">Tu carga, nuestro camino.</p></div>'
     )
+    if settings.EMAIL_PROVIDER == "brevo":
+        if not settings.BREVO_API_KEY:
+            return False, "BREVO_API_KEY no está configurada en Render."
+        if not settings.BREVO_SENDER_EMAIL:
+            return False, "BREVO_SENDER_EMAIL no está configurado."
+        payload = {
+            "sender": {
+                "name": settings.BREVO_SENDER_NAME or "MOVIX",
+                "email": settings.BREVO_SENDER_EMAIL,
+            },
+            "to": [{"email": recipient}],
+            "subject": str(subject),
+            "textContent": str(body),
+            "htmlContent": html,
+        }
+        if attachment_name and attachment_bytes:
+            payload["attachment"] = [{
+                "name": str(attachment_name),
+                "content": base64.b64encode(attachment_bytes).decode("ascii"),
+            }]
+        try:
+            response = requests.post(
+                settings.BREVO_API_URL,
+                headers={
+                    "accept": "application/json",
+                    "api-key": settings.BREVO_API_KEY,
+                    "content-type": "application/json",
+                },
+                json=payload,
+                timeout=(8, 25),
+            )
+            if response.status_code in {200, 201, 202}:
+                return True, ""
+            try:
+                detail = response.json().get("message") or response.json().get("code")
+            except ValueError:
+                detail = response.text
+            return False, f"Brevo respondió {response.status_code}: {str(detail or 'error desconocido')[:200]}"
+        except requests.RequestException as exc:
+            return False, f"No se pudo conectar con Brevo: {str(exc)[:210]}"
+
     email = EmailMultiAlternatives(
-        subject=subject,
-        body=body,
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        to=[recipient],
+        subject=subject, body=body, from_email=settings.DEFAULT_FROM_EMAIL, to=[recipient]
     )
     email.attach_alternative(html, "text/html")
     if attachment_name and attachment_bytes:

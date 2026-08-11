@@ -132,8 +132,17 @@ SUPABASE_PRIVATE_BUCKET = os.getenv("SUPABASE_PRIVATE_BUCKET", "movix-documents"
 FIREBASE_CREDENTIALS_JSON = os.getenv("FIREBASE_CREDENTIALS_JSON", "")
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "10"))
 
-# Correo para facturas y avisos. En desarrollo se imprime en la consola si no
-# se configura SMTP; en Render utiliza las variables EMAIL_* indicadas en V11.
+# Correo para facturas y avisos. Render Free bloquea los puertos SMTP, por lo
+# que en producción se recomienda Brevo mediante HTTPS. SMTP se conserva como
+# alternativa para desarrollo local o servicios de pago que permitan el puerto.
+EMAIL_PROVIDER = os.getenv(
+    "EMAIL_PROVIDER",
+    "brevo" if os.getenv("BREVO_API_KEY") else "smtp",
+).strip().lower()
+BREVO_API_KEY = os.getenv("BREVO_API_KEY", "").strip()
+BREVO_API_URL = os.getenv("BREVO_API_URL", "https://api.brevo.com/v3/smtp/email").strip()
+BREVO_SENDER_EMAIL = os.getenv("BREVO_SENDER_EMAIL", "movix_soporte@gmail.com").strip()
+BREVO_SENDER_NAME = os.getenv("BREVO_SENDER_NAME", "MOVIX").strip()
 EMAIL_BACKEND = os.getenv(
     "EMAIL_BACKEND",
     "django.core.mail.backends.console.EmailBackend" if DEBUG else "django.core.mail.backends.smtp.EmailBackend",
@@ -143,6 +152,7 @@ EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
 EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True").lower() in {"1", "true", "yes", "on"}
+EMAIL_TIMEOUT = int(os.getenv("EMAIL_TIMEOUT", "12"))
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER or "MOVIX <movix_soporte@gmail.com>")
 
 # Datos públicos mostrados únicamente en la landing.

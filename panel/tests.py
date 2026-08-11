@@ -30,7 +30,7 @@ from .models import (
     Ride,
     SystemSetting,
 )
-from .services import is_safe_media_url, resolve_media_url, upload_to_supabase
+from .services import is_safe_media_url, resolve_media_url, send_movix_email, upload_to_supabase
 
 
 EXTERNAL_MODELS = [
@@ -85,6 +85,50 @@ class PublicPagesTests(SimpleTestCase):
         response = self.client.get(reverse("panel:dashboard"))
         self.assertEqual(response.status_code, 302)
         self.assertIn(reverse("login"), response.url)
+
+
+class BrevoEmailTests(SimpleTestCase):
+    @override_settings(
+        EMAIL_PROVIDER="brevo",
+        BREVO_API_KEY="brevo-test-key",
+        BREVO_API_URL="https://api.brevo.com/v3/smtp/email",
+        BREVO_SENDER_EMAIL="movix_soporte@gmail.com",
+        BREVO_SENDER_NAME="MOVIX",
+    )
+    @patch("panel.services.requests.post")
+    def test_brevo_sends_pdf_attachment_over_https(self, post):
+        post.return_value = Mock(status_code=201)
+
+        sent, error = send_movix_email(
+            "transportista@example.com", "Factura MOVIX",
+            "Adjuntamos tu factura.", "FACT-001.pdf", b"%PDF-1.4 prueba",
+        )
+
+        self.assertTrue(sent)
+        self.assertEqual(error, "")
+        _, kwargs = post.call_args
+        self.assertEqual(kwargs["headers"]["api-key"], "brevo-test-key")
+        self.assertEqual(kwargs["json"]["to"], [{"email": "transportista@example.com"}])
+        self.assertEqual(kwargs["json"]["attachment"][0]["name"], "FACT-001.pdf")
+        self.assertTrue(kwargs["json"]["attachment"][0]["content"])
+
+    @override_settings(
+        EMAIL_PROVIDER="brevo",
+        BREVO_API_KEY="brevo-test-key",
+        BREVO_API_URL="https://api.brevo.com/v3/smtp/email",
+        BREVO_SENDER_EMAIL="movix_soporte@gmail.com",
+        BREVO_SENDER_NAME="MOVIX",
+    )
+    @patch("panel.services.requests.post")
+    def test_brevo_returns_readable_api_error(self, post):
+        post.return_value = Mock(status_code=400)
+        post.return_value.json.return_value = {"message": "sender not valid"}
+
+        sent, error = send_movix_email("destino@example.com", "Aviso", "Prueba")
+
+        self.assertFalse(sent)
+        self.assertIn("Brevo respondió 400", error)
+        self.assertIn("sender not valid", error)
 
 
 class FormTests(SimpleTestCase):

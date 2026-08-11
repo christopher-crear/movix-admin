@@ -37,6 +37,16 @@ services:
         sync: false
       - key: EMAIL_USE_TLS
         value: "True"
+      - key: EMAIL_PROVIDER
+        value: brevo
+      - key: BREVO_API_KEY
+        sync: false
+      - key: BREVO_SENDER_EMAIL
+        value: movix_soporte@gmail.com
+      - key: BREVO_SENDER_NAME
+        value: MOVIX
+      - key: EMAIL_TIMEOUT
+        value: "12"
       - key: DEFAULT_FROM_EMAIL
         value: "MOVIX <movix_soporte@gmail.com>"
       - key: ALLOWED_HOSTS

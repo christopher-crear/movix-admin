@@ -1030,6 +1030,9 @@ def admin_driver_messages(request):
         inbox_message.is_read = False
         inbox_message.created_by = request.user.username
         inbox_message.created_at = timezone.now()
+        # Primero se conserva el mensaje interno. Un proveedor de correo caído
+        # nunca debe hacer que el transportista pierda el aviso en su buzón.
+        inbox_message.save(force_insert=True)
         email_sent, email_error = (False, "")
         if form.cleaned_data.get("send_email"):
             email_sent, email_error = send_movix_email(
@@ -1039,7 +1042,7 @@ def admin_driver_messages(request):
             )
             if email_sent:
                 inbox_message.emailed_at = timezone.now()
-        inbox_message.save(force_insert=True)
+                inbox_message.save(update_fields=["emailed_at"])
         _notify_profile(inbox_message.driver, inbox_message.title, inbox_message.body, inbox_message.message_type)
         audit(request, "send", "driver_inbox_message", f"Envió mensaje a {inbox_message.driver.full_name}", inbox_message.id)
         if form.cleaned_data.get("send_email") and not email_sent:

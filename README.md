@@ -116,30 +116,23 @@ Edita `.env` y coloca tus valores. No publiques ese archivo ni compartas la clav
 | `SUPABASE_ANON_KEY` | Supabase → Project Settings → API Keys → Publishable/anon key |
 | `SECRET_KEY` | Genera una clave de Django |
 
-### Configurar Gmail para facturas, avisos y respuestas
+### Configurar Brevo para facturas, avisos y respuestas
 
-MOVIX usa el mismo correo SMTP para enviar facturas, reuniones, avisos y las
-respuestas del módulo **Solicitudes**. No debes colocar la contraseña normal de
-Gmail:
+MOVIX utiliza el mismo proveedor para enviar facturas, reuniones, avisos y las
+respuestas del módulo **Solicitudes**. En Render Free se usa Brevo por HTTPS,
+porque los puertos SMTP están bloqueados.
 
-1. Entra en la cuenta que enviará los mensajes, por ejemplo
-   `movix_soporte@gmail.com`.
-2. Abre **Cuenta de Google → Seguridad** y activa la verificación en dos pasos.
-3. Busca **Contraseñas de aplicaciones**, crea una con el nombre `MOVIX Render`
-   y copia la clave de 16 caracteres.
-4. Configura estas variables tanto en `.env` como en Render → Environment:
+1. Crea una API Key en Brevo y verifica el remitente.
+2. Configura estas variables en Render → Environment:
 
 ```env
-EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
-EMAIL_HOST=smtp.gmail.com
-EMAIL_PORT=587
-EMAIL_HOST_USER=movix_soporte@gmail.com
-EMAIL_HOST_PASSWORD=CLAVE_DE_APLICACION_DE_16_CARACTERES
-EMAIL_USE_TLS=True
-DEFAULT_FROM_EMAIL="MOVIX <movix_soporte@gmail.com>"
+EMAIL_PROVIDER=brevo
+BREVO_API_KEY=TU_API_KEY_PRIVADA
+BREVO_SENDER_EMAIL=movix_soporte@gmail.com
+BREVO_SENDER_NAME=MOVIX
 ```
 
-5. Reinicia `runserver` en local o ejecuta **Manual Deploy** en Render.
+3. Ejecuta **Manual Deploy → Deploy latest commit** en Render.
 
 Puedes comprobar el envío desde la consola del proyecto, reemplazando el correo
 de destino:
@@ -148,10 +141,13 @@ de destino:
 python manage.py shell -c "from panel.services import send_movix_email; print(send_movix_email('TU_CORREO@gmail.com', 'Prueba MOVIX', 'El correo de MOVIX funciona correctamente.'))"
 ```
 
-El resultado correcto es `(True, '')`. Si SMTP falla, las facturas y respuestas
-siguen guardadas en el sistema, pero se muestran como pendientes de envío junto
-con el error devuelto por Gmail. Nunca publiques `.env` ni la contraseña de
-aplicación en GitHub.
+El resultado correcto es `(True, '')`. Si Brevo falla, los mensajes y respuestas
+siguen guardados y MOVIX muestra el motivo devuelto por la API. Nunca publiques
+`.env` ni `BREVO_API_KEY` en GitHub.
+
+Para desarrollo local también se puede usar SMTP con `EMAIL_PROVIDER=smtp` y
+las variables `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`,
+`EMAIL_HOST_PASSWORD` y `EMAIL_USE_TLS`.
 
 Genera `SECRET_KEY` con:
 
