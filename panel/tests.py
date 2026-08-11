@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 from unittest.mock import Mock, patch
 
 from django.contrib.auth.models import User
@@ -11,23 +12,42 @@ from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from .forms import ProfileCreateForm, ProfileForm, PublicContactForm
+from .forms import DriverSelfProfileForm, ProfileCreateForm, ProfileForm, PublicContactForm
 from .models import (
     Advertisement,
+    AdminProfile,
     AuditLog,
     ContactRequest,
     DeviceToken,
+    DriverMonthlyPayment,
+    DriverInboxMessage,
+    DriverInvoice,
     DriverReview,
     Notification,
     NotificationCampaign,
+    PaymentBankAccount,
     Profile,
     Ride,
     SystemSetting,
 )
-from .services import upload_to_supabase
+from .services import is_safe_media_url, resolve_media_url, upload_to_supabase
 
 
-EXTERNAL_MODELS = [Profile, Ride, DriverReview, Notification, Advertisement, NotificationCampaign, DeviceToken, AuditLog, SystemSetting]
+EXTERNAL_MODELS = [
+    Profile,
+    Ride,
+    DriverReview,
+    Notification,
+    DriverMonthlyPayment,
+    PaymentBankAccount,
+    DriverInvoice,
+    DriverInboxMessage,
+    Advertisement,
+    NotificationCampaign,
+    DeviceToken,
+    AuditLog,
+    SystemSetting,
+]
 
 
 class PublicPagesTests(SimpleTestCase):
@@ -47,16 +67,19 @@ class PublicPagesTests(SimpleTestCase):
         self.assertContains(response, "Datos 100% ficticios")
         self.assertNotContains(response, "Christopher Eras")
 
-    def test_landing_does_not_expose_admin_login_link(self):
+    def test_landing_exposes_driver_portal_without_naming_admin_panel(self):
         response = self.client.get(reverse("panel:landing"))
-        self.assertNotContains(response, reverse("login"))
+        self.assertContains(response, reverse("login"))
+        self.assertContains(response, "Portal transportista")
+        self.assertNotContains(response, "Panel administrativo")
         self.assertContains(response, "movix_soporte@gmail.com")
         self.assertContains(response, "593989414258")
 
     def test_login_page_renders(self):
         response = self.client.get(reverse("login"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Bienvenido, administrador")
+        self.assertContains(response, "Bienvenido a MOVIX")
+        self.assertContains(response, "Continuar con Google")
 
     def test_anonymous_user_is_redirected(self):
         response = self.client.get(reverse("panel:dashboard"))
@@ -76,6 +99,20 @@ class FormTests(SimpleTestCase):
         self.assertIsInstance(form.fields["first_name"].widget, forms.TextInput)
         self.assertNotIsInstance(form.fields["first_name"].widget, forms.Textarea)
         self.assertIsInstance(form.fields["email"].widget, forms.EmailInput)
+
+    def test_driver_vehicle_type_is_limited_to_three_choices(self):
+        form = ProfileForm(role="transportista")
+        self.assertIsInstance(form.fields["vehicle_type"].widget, forms.Select)
+        self.assertEqual(
+            list(form.fields["vehicle_type"].widget.choices),
+            [("camioneta", "Camioneta"), ("camion_pequeno", "Camión pequeño"), ("camion_mediano", "Camión mediano")],
+        )
+
+    def test_driver_can_upload_identification_document_from_own_profile(self):
+        form = DriverSelfProfileForm(role="transportista")
+        self.assertIn("identification_file", form.fields)
+        self.assertNotIn("identification_number", form.fields)
+        self.assertNotIn("email", form.fields)
 
     def test_invalid_ecuadorian_identification_length(self):
         form = ProfileCreateForm(
@@ -114,6 +151,7 @@ class FormTests(SimpleTestCase):
     SUPABASE_URL="https://project.supabase.co",
     SUPABASE_SERVICE_ROLE_KEY="sb_secret_test",
     SUPABASE_PUBLIC_BUCKET="movix-public",
+    SUPABASE_PRIVATE_BUCKET="movix-documents",
     MAX_UPLOAD_MB=10,
 )
 class StorageServiceTests(SimpleTestCase):
@@ -129,6 +167,50 @@ class StorageServiceTests(SimpleTestCase):
         value = upload_to_supabase(image, "profiles/demo/profile", public=True, images_only=True)
         self.assertTrue(value.startswith("https://project.supabase.co/storage/v1/object/public/movix-public/"))
         self.assertEqual(post_mock.call_count, 1)
+
+    @patch("panel.services._find_storage_objects", return_value=[("app-documents", "cedulas/usuario/cedula.jpg")])
+    @patch("panel.services.requests.post")
+    def test_raw_mobile_path_is_found_and_signed(self, post_mock, _lookup):
+        response = Mock(status_code=200)
+        response.json.return_value = {
+            "signedURL": "/object/sign/app-documents/cedulas/usuario/cedula.jpg?token=nuevo"
+        }
+        post_mock.return_value = response
+        url = resolve_media_url("cedulas/usuario/cedula.jpg", preferred_buckets=("movix-documents",))
+        self.assertEqual(
+            url,
+            "https://project.supabase.co/storage/v1/object/sign/app-documents/cedulas/usuario/cedula.jpg?token=nuevo",
+        )
+        self.assertIn("/app-documents/cedulas/usuario/cedula.jpg", post_mock.call_args.args[0])
+
+    @patch("panel.services.requests.post")
+    def test_expired_signed_url_is_re_signed(self, post_mock):
+        response = Mock(status_code=200)
+        response.json.return_value = {
+            "signedURL": "/object/sign/movix-documents/identification/demo.jpg?token=renovado"
+        }
+        post_mock.return_value = response
+        old = "https://project.supabase.co/storage/v1/object/sign/movix-documents/identification/demo.jpg?token=vencido"
+        self.assertIn("token=renovado", resolve_media_url(old))
+
+    @patch(
+        "panel.services._find_storage_objects",
+        return_value=[("profile-media", "profiles/usuario/avatar.jpg", True)],
+    )
+    @patch("panel.services.requests.post")
+    def test_historical_public_bucket_uses_public_url_without_signing(self, post_mock, _lookup):
+        url = resolve_media_url("profiles/usuario/avatar.jpg")
+        self.assertEqual(
+            url,
+            "https://project.supabase.co/storage/v1/object/public/profile-media/profiles/usuario/avatar.jpg",
+        )
+        post_mock.assert_not_called()
+
+    def test_relative_storage_paths_are_safe_but_traversal_is_rejected(self):
+        self.assertTrue(is_safe_media_url("identification/usuario/cedula.jpg"))
+        self.assertTrue(is_safe_media_url("/storage/v1/object/public/movix-public/perfil.jpg"))
+        self.assertFalse(is_safe_media_url("../../archivo.env"))
+        self.assertFalse(is_safe_media_url("//sitio-malicioso.example/archivo.jpg"))
 
 
 class PanelIntegrationTests(TransactionTestCase):
@@ -166,6 +248,330 @@ class PanelIntegrationTests(TransactionTestCase):
             vehicle_plate="LAA-5986", verification_status="approved", profile_verified=True,
             created_at=timezone.now(), updated_at=timezone.now(),
         )
+        self.bank_account = PaymentBankAccount.objects.create(
+            code="banco_loja",
+            account_holder="MOVIX Loja",
+            account_number="2200123456",
+            account_type="savings",
+            identification_number="1100000000",
+            is_active=True,
+            sort_order=1,
+            created_at=timezone.now(),
+            updated_at=timezone.now(),
+        )
+
+    def _open_driver_session(self):
+        self.client.logout()
+        session = self.client.session
+        session["portal_profile_id"] = str(self.driver_profile.id)
+        session["portal_role"] = "transportista"
+        session.save()
+
+    def _create_driver_ride(self, **overrides):
+        values = {
+            "client": self.user_profile,
+            "driver": self.driver_profile,
+            "origin_address": "Mercado Central, Loja",
+            "destination_address": "Barrio Los Pinos, Loja",
+            "price": Decimal("18.50"),
+            "driver_price": Decimal("15.00"),
+            "status": "completada",
+            "distance_km": Decimal("7.25"),
+            "created_at": timezone.now(),
+            "completed_at": timezone.now(),
+        }
+        values.update(overrides)
+        return Ride.objects.create(**values)
+
+    @patch("panel.views.supabase_password_sign_in")
+    def test_driver_can_login_with_supabase_email_and_password(self, sign_in):
+        self.client.logout()
+        sign_in.return_value = {
+            "access_token": "access-token",
+            "refresh_token": "refresh-token",
+            "user": {"id": str(self.driver_profile.id), "email": self.driver_profile.email},
+        }
+
+        response = self.client.post(
+            reverse("login"),
+            {"username": self.driver_profile.email, "password": "ClaveSegura123"},
+        )
+
+        self.assertRedirects(response, reverse("panel:driver_dashboard"), fetch_redirect_response=False)
+        self.assertEqual(self.client.session["portal_profile_id"], str(self.driver_profile.id))
+        self.assertEqual(self.client.session["portal_role"], "transportista")
+
+    @patch("panel.views.supabase_password_sign_in")
+    def test_driver_role_wins_when_email_is_also_used_by_django_staff(self, sign_in):
+        self.client.logout()
+        User.objects.create_user(
+            username="admin_collision",
+            email=self.driver_profile.email,
+            password="ClaveSegura123",
+            is_staff=True,
+        )
+        sign_in.return_value = {
+            "access_token": "access-token",
+            "refresh_token": "refresh-token",
+            "user": {"id": str(self.driver_profile.id), "email": self.driver_profile.email},
+        }
+
+        response = self.client.post(
+            reverse("login"),
+            {"username": self.driver_profile.email, "password": "ClaveSegura123"},
+        )
+
+        self.assertRedirects(response, reverse("panel:driver_dashboard"), fetch_redirect_response=False)
+        self.assertFalse(response.wsgi_request.user.is_authenticated)
+        self.assertEqual(self.client.session["portal_role"], "transportista")
+
+    @patch("panel.views.supabase_user_from_token")
+    def test_google_driver_is_not_promoted_by_matching_staff_email(self, user_from_token):
+        self.client.logout()
+        User.objects.create_user(
+            username="google_admin_collision",
+            email=self.driver_profile.email,
+            password="OtraClave123",
+            is_staff=True,
+        )
+        user_from_token.return_value = {
+            "id": str(self.driver_profile.id),
+            "email": self.driver_profile.email,
+        }
+
+        response = self.client.post(
+            reverse("panel:auth_session"),
+            {"access_token": "google-token", "refresh_token": "refresh-token"},
+        )
+
+        self.assertRedirects(response, reverse("panel:driver_dashboard"), fetch_redirect_response=False)
+        self.assertEqual(self.client.session["portal_role"], "transportista")
+
+    def test_driver_portal_uses_real_supabase_models(self):
+        ride = self._create_driver_ride()
+        DriverReview.objects.create(
+            ride=ride,
+            client=self.user_profile,
+            driver=self.driver_profile,
+            rating=5,
+            comment="Excelente atención y cuidado de la carga.",
+            created_at=timezone.now(),
+            updated_at=timezone.now(),
+        )
+        self._open_driver_session()
+
+        dashboard = self.client.get(reverse("panel:driver_dashboard"))
+        self.assertEqual(dashboard.status_code, 200)
+        self.assertContains(dashboard, "Mercado Central, Loja")
+        self.assertContains(dashboard, 'class="app-shell"')
+        self.assertContains(dashboard, "Mis carreras")
+        self.assertNotContains(dashboard, 'class="driver-shell"')
+        self.assertNotContains(dashboard, reverse("panel:profile_list", args=["users"]))
+        self.assertEqual(dashboard.context["weekly_earnings"], ride.effective_price)
+
+        rides = self.client.get(reverse("panel:driver_rides"))
+        self.assertContains(rides, "Barrio Los Pinos, Loja")
+
+        detail = self.client.get(reverse("panel:driver_ride_detail", args=[ride.id]))
+        self.assertContains(detail, "Excelente atención y cuidado de la carga.")
+
+        reviews = self.client.get(reverse("panel:driver_reviews"))
+        self.assertContains(reviews, "Excelente atención y cuidado de la carga.")
+
+        profile = self.client.get(reverse("panel:driver_profile"))
+        self.assertContains(profile, self.driver_profile.full_name)
+        self.assertContains(profile, self.driver_profile.vehicle_plate)
+        self.assertContains(profile, "Editar información")
+        self.assertContains(profile, "Mensualidad")
+
+    @patch("panel.views.upload_to_supabase", return_value="storage://movix-documents/monthly-payments/demo/recibo.pdf")
+    def test_driver_can_submit_monthly_payment_receipt(self, _upload):
+        self._open_driver_session()
+        receipt = SimpleUploadedFile("recibo.pdf", b"pdf-demo", content_type="application/pdf")
+        response = self.client.post(
+            reverse("panel:driver_payments"),
+            {
+                "period": timezone.localdate().strftime("%Y-%m"),
+                "amount": "20.00",
+                "bank": "banco_loja",
+                "payment_method": "transfer",
+                "receipt": receipt,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        payment = DriverMonthlyPayment.objects.get(driver=self.driver_profile)
+        self.assertEqual(payment.status, DriverMonthlyPayment.STATUS_PENDING)
+        self.assertEqual(payment.bank, "banco_loja")
+        self.assertTrue(payment.receipt_url.endswith("recibo.pdf"))
+
+    @patch("panel.views.upload_to_supabase")
+    def test_driver_can_register_physical_payment_without_receipt(self, upload):
+        self._open_driver_session()
+        response = self.client.post(
+            reverse("panel:driver_payments"),
+            {
+                "period": timezone.localdate().strftime("%Y-%m"),
+                "amount": "20.00",
+                "bank": "physical",
+                "payment_method": "cash",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        upload.assert_not_called()
+        payment = DriverMonthlyPayment.objects.get(driver=self.driver_profile)
+        self.assertEqual(payment.bank, "physical")
+        self.assertEqual(payment.payment_method, "cash")
+        self.assertFalse(payment.receipt_url)
+
+    def test_driver_sees_only_admin_configured_bank_and_mailbox(self):
+        DriverInboxMessage.objects.create(
+            driver=self.driver_profile,
+            message_type="meeting",
+            title="Reunión de transportistas",
+            body="Nos reuniremos el viernes a las 18:00.",
+            created_at=timezone.now(),
+        )
+        self._open_driver_session()
+
+        payments = self.client.get(reverse("panel:driver_payments"))
+        self.assertContains(payments, "Banco de Loja")
+        self.assertContains(payments, "2200123456")
+        self.assertContains(payments, 'data-bank-dialog-open=')
+        self.assertContains(payments, '<option value="banco_loja"', html=False)
+        self.assertContains(payments, '<option value="transfer"', html=False)
+        self.assertContains(payments, '<option value="deposit"', html=False)
+        self.assertContains(payments, '<option value="cash"', html=False)
+        self.assertContains(payments, "Pago físico")
+
+        inbox = self.client.get(reverse("panel:driver_inbox"))
+        self.assertContains(inbox, "Reunión de transportistas")
+        self.assertContains(inbox, "Sin leer")
+
+    @patch("panel.views.send_push_notifications", return_value=(0, ""))
+    @patch("panel.views.active_tokens_for_users", return_value=[])
+    def test_admin_can_block_driver_and_stores_notification_reason(self, _tokens, _push):
+        response = self.client.post(
+            reverse("panel:driver_payment_block", args=[self.driver_profile.id, "block"]),
+            {"reason": "Mensualidad pendiente de agosto."},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.driver_profile.refresh_from_db()
+        self.assertFalse(self.driver_profile.is_active)
+        self.assertEqual(self.driver_profile.blocked_reason, "Mensualidad pendiente de agosto.")
+        self.assertTrue(Notification.objects.filter(user=self.driver_profile, type="account_status", message__icontains="Mensualidad pendiente").exists())
+
+    def test_admin_monthly_payment_module_lists_real_driver(self):
+        payment = DriverMonthlyPayment.objects.create(
+            driver=self.driver_profile,
+            period=timezone.localdate().replace(day=1),
+            amount=Decimal("18.00"), bank="jep", payment_method="deposit",
+            receipt_url="storage://movix-documents/monthly-payments/receipt.jpg",
+            status="pending", created_at=timezone.now(), updated_at=timezone.now(),
+        )
+        listing = self.client.get(reverse("panel:monthly_payment_list"))
+        self.assertEqual(listing.status_code, 200)
+        self.assertContains(listing, self.driver_profile.full_name)
+        self.assertContains(listing, "Cooperativa JEP")
+        self.assertContains(listing, "payments-layout-v12")
+        self.assertContains(listing, "payment-summary-grid")
+        self.assertContains(listing, "payment-filter-toolbar")
+        detail = self.client.get(reverse("panel:monthly_payment_detail", args=[payment.id]))
+        self.assertContains(detail, "Comprobante adjunto")
+
+        banks = self.client.get(reverse("panel:payment_bank_accounts"))
+        self.assertContains(banks, "bank-admin-v12")
+        self.assertContains(banks, "bank-settings-form")
+
+        messages_view = self.client.get(reverse("panel:admin_driver_messages"))
+        self.assertContains(messages_view, "message-center-v12")
+        self.assertContains(messages_view, "message-history-panel")
+
+    @patch("panel.views.send_push_notifications", return_value=(0, ""))
+    @patch("panel.views.active_tokens_for_users", return_value=[])
+    @patch("panel.views.send_movix_email", return_value=(True, ""))
+    @patch("panel.views.upload_to_supabase", return_value="storage://movix-documents/monthly-invoices/factura.pdf")
+    @patch("panel.views.build_monthly_invoice_pdf", return_value=b"factura-pdf")
+    def test_admin_generates_invoice_for_approved_payment_and_driver_receives_it(
+        self, _build, _upload, send_email, _tokens, _push
+    ):
+        payment = DriverMonthlyPayment.objects.create(
+            driver=self.driver_profile,
+            period=timezone.localdate().replace(day=1),
+            amount=Decimal("20.00"),
+            bank="banco_loja",
+            payment_method="transfer",
+            receipt_url="storage://movix-documents/monthly-payments/receipt.pdf",
+            status="approved",
+            reviewed_by=self.admin.username,
+            reviewed_at=timezone.now(),
+            created_at=timezone.now(),
+            updated_at=timezone.now(),
+        )
+
+        response = self.client.post(reverse("panel:monthly_payment_invoice", args=[payment.id]))
+
+        self.assertEqual(response.status_code, 302)
+        invoice = DriverInvoice.objects.get(payment=payment)
+        self.assertTrue(invoice.invoice_number.startswith("MOVIX-"))
+        self.assertEqual(invoice.pdf_url, "storage://movix-documents/monthly-invoices/factura.pdf")
+        self.assertTrue(
+            DriverInboxMessage.objects.filter(
+                driver=self.driver_profile,
+                invoice=invoice,
+                message_type="invoice",
+            ).exists()
+        )
+        send_email.assert_called_once()
+
+        self._open_driver_session()
+        invoice_list = self.client.get(reverse("panel:driver_invoices"))
+        self.assertEqual(invoice_list.status_code, 200)
+        self.assertContains(invoice_list, invoice.invoice_number)
+        self.assertContains(invoice_list, "Descargar PDF")
+        self.assertContains(invoice_list, "Mis facturas")
+
+        payment_history = self.client.get(reverse("panel:driver_payments"))
+        self.assertNotContains(payment_history, "Ver factura")
+
+    @patch("panel.views.resolve_media_url", return_value="https://project.supabase.co/storage/v1/object/sign/movix-documents/receipt.pdf?token=ok")
+    @patch("panel.views.requests.get")
+    def test_driver_can_preview_own_payment_receipt(self, get_mock, _resolve):
+        payment = DriverMonthlyPayment.objects.create(
+            driver=self.driver_profile, period=timezone.localdate().replace(day=1),
+            bank="banco_pichincha", payment_method="transfer",
+            receipt_url="storage://movix-documents/monthly-payments/receipt.pdf",
+            status="pending", created_at=timezone.now(), updated_at=timezone.now(),
+        )
+        upstream = Mock(status_code=200)
+        upstream.headers = {"Content-Type": "application/pdf", "Content-Length": "7"}
+        upstream.iter_content.return_value = iter([b"pdfdata"])
+        upstream.raise_for_status.return_value = None
+        get_mock.return_value = upstream
+        self._open_driver_session()
+        response = self.client.get(reverse("panel:monthly_payment_receipt", args=[payment.id, "view"]))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertEqual(b"".join(response.streaming_content), b"pdfdata")
+
+    def test_ride_detail_uses_client_profile_photo(self):
+        self.user_profile.profile_photo_url = "https://project.supabase.co/storage/v1/object/public/movix-public/client.jpg"
+        self.user_profile.save(update_fields=["profile_photo_url"])
+        ride = self._create_driver_ride()
+        self._open_driver_session()
+        response = self.client.get(reverse("panel:driver_ride_detail", args=[ride.id]))
+        self.assertContains(response, 'alt="Foto de María González"')
+
+    def test_driver_cannot_view_another_drivers_ride(self):
+        other_driver = Profile.objects.create(
+            id=uuid.uuid4(), role="transportista", first_name="Daniel", last_name="Vera",
+            email="daniel@example.com", identification_number="1100000002", is_active=True,
+            created_at=timezone.now(), updated_at=timezone.now(),
+        )
+        ride = self._create_driver_ride(driver=other_driver)
+        self._open_driver_session()
+
+        response = self.client.get(reverse("panel:driver_ride_detail", args=[ride.id]))
+        self.assertEqual(response.status_code, 404)
 
     def test_public_contact_request_is_saved(self):
         self.client.logout()
@@ -186,7 +592,8 @@ class PanelIntegrationTests(TransactionTestCase):
         self.assertIn("enviado=1", response.url)
         self.assertTrue(ContactRequest.objects.filter(email="ana@example.com").exists())
 
-    def test_contact_request_can_be_reviewed_and_answered(self):
+    @patch("panel.views.send_movix_email", return_value=(True, ""))
+    def test_contact_request_can_be_reviewed_and_answered(self, send_email):
         contact = ContactRequest.objects.create(
             full_name="Ana Torres",
             email="ana@example.com",
@@ -205,6 +612,10 @@ class PanelIntegrationTests(TransactionTestCase):
         contact.refresh_from_db()
         self.assertEqual(contact.status, ContactRequest.STATUS_RESPONDED)
         self.assertEqual(contact.responded_by, "admin_movix")
+        send_email.assert_called_once()
+        self.assertEqual(send_email.call_args.args[0], "ana@example.com")
+        self.assertIn("Respuesta MOVIX", send_email.call_args.args[1])
+        self.assertIn("Con gusto coordinamos una reunión.", send_email.call_args.args[2])
 
     def test_dashboard_uses_real_profiles(self):
         response = self.client.get(reverse("panel:dashboard"))
@@ -226,6 +637,74 @@ class PanelIntegrationTests(TransactionTestCase):
         detail = self.client.get(reverse("panel:verification_detail", args=[self.user_profile.id]))
         self.assertContains(detail, "documentPreviewDialog")
         self.assertContains(detail, "data-document-preview")
+        self.assertContains(detail, "asset-preview-card")
+        self.assertContains(detail, "asset-preview-frame")
+        self.assertContains(detail, "asset-preview-name")
+        self.assertContains(detail, "asset-preview-download")
+        self.assertContains(detail, "movix-critical-media-v60")
+        self.assertContains(detail, "app.css?v=20260810-140", html=False)
+        self.assertContains(detail, "app.js?v=20260810-140", html=False)
+        self.assertContains(detail, ".document-preview-stage.show-pdf>img{display:none!important}", html=False)
+
+        profile = self.client.get(reverse("panel:profile_detail", args=["users", self.user_profile.id]))
+        self.assertContains(profile, "asset-preview-card")
+        self.assertContains(profile, "Miniatura de Cédula de identidad")
+
+    @patch("panel.views.resolve_media_url", return_value="")
+    def test_missing_storage_object_returns_visible_placeholder(self, _resolve):
+        self.user_profile.identification_photo_url = "cedulas/archivo-inexistente.jpg"
+        self.user_profile.save(update_fields=["identification_photo_url"])
+        response = self.client.get(
+            reverse("panel:document_access", args=[self.user_profile.id, "identification", "view"])
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "image/svg+xml")
+        self.assertEqual(response["X-Movix-Media-Status"], "storage-object-not-found")
+        self.assertContains(response, "No se encontró Cédula de identidad")
+
+    @patch("panel.views.requests.get")
+    @patch("panel.views.resolve_media_url", return_value="https://project.supabase.co/storage/v1/object/sign/movix-documents/cedula.jpg?token=ok")
+    def test_private_document_is_proxied_inline_by_django(self, _resolve, get_mock):
+        upstream = Mock(status_code=200)
+        upstream.headers = {"Content-Type": "image/jpeg", "Content-Length": "6"}
+        upstream.iter_content.return_value = iter([b"imagen"])
+        get_mock.return_value = upstream
+
+        response = self.client.get(
+            reverse("panel:document_access", args=[self.user_profile.id, "identification", "view"])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "image/jpeg")
+        self.assertTrue(response["Content-Disposition"].startswith("inline;"))
+        self.assertEqual(response["X-Movix-Media-Status"], "proxied")
+        self.assertEqual(response["X-Frame-Options"], "SAMEORIGIN")
+        self.assertEqual(b"".join(response.streaming_content), b"imagen")
+
+    def test_pdf_document_has_embedded_first_page_preview(self):
+        self.user_profile.identification_photo_url = "storage://movix-documents/perfiles/cedula.pdf"
+        self.user_profile.save(update_fields=["identification_photo_url"])
+
+        response = self.client.get(reverse("panel:verification_detail", args=[self.user_profile.id]))
+
+        self.assertContains(response, "asset-pdf-thumbnail")
+        self.assertContains(response, "#page=1&zoom=page-fit", html=False)
+        self.assertContains(response, "Primera página de Cédula de identidad")
+
+    @patch("panel.views.requests.get")
+    @patch("panel.views.resolve_media_url", return_value="https://project.supabase.co/storage/v1/object/sign/movix-documents/cedula.jpg?token=ok")
+    def test_storage_permission_failure_returns_placeholder_instead_of_broken_image(self, _resolve, get_mock):
+        upstream = Mock(status_code=403)
+        upstream.headers = {"Content-Type": "application/json"}
+        get_mock.return_value = upstream
+
+        response = self.client.get(
+            reverse("panel:document_access", args=[self.user_profile.id, "identification", "view"])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "image/svg+xml")
+        self.assertEqual(response["X-Movix-Media-Status"], "storage-download-failed")
 
     def test_profile_photo_replaces_initials_when_available(self):
         self.user_profile.profile_photo_url = "https://example.supabase.co/storage/v1/object/public/movix-public/avatar.jpg"
@@ -272,6 +751,21 @@ class PanelIntegrationTests(TransactionTestCase):
         response = self.client.get(reverse("panel:dashboard"))
         self.assertEqual(response.status_code, 403)
 
+    def test_profile_cover_uses_an_image_that_fills_the_card(self):
+        AdminProfile.objects.create(user=self.admin, cover_url="https://example.com/portada.jpg")
+        response = self.client.get(reverse("panel:admin_profile"))
+        self.assertContains(response, 'class="admin-profile-cover-image profile-cover-image"')
+        self.assertContains(response, 'src="https://example.com/portada.jpg"')
+        self.assertContains(response, "Editar perfil")
+        self.assertContains(response, "Información personal")
+        self.assertNotContains(response, 'id="id_profile-first_name"')
+
+        editing = self.client.get(reverse("panel:admin_profile") + "?editar=1")
+        self.assertContains(editing, "admin-media-upload", count=2)
+        self.assertContains(editing, '<span class="local-file-preview"', count=2, html=False)
+        self.assertContains(editing, 'id="id_profile-first_name"')
+        self.assertContains(editing, "Cancelar edición")
+
     def test_all_administrative_views_render(self):
         contact = ContactRequest.objects.create(
             full_name="Ana Torres",
@@ -290,6 +784,9 @@ class PanelIntegrationTests(TransactionTestCase):
             reverse("panel:verification_detail", args=[self.user_profile.id]),
             reverse("panel:verification_detail", args=[self.driver_profile.id]),
             reverse("panel:notifications"),
+            reverse("panel:monthly_payment_list"),
+            reverse("panel:payment_bank_accounts"),
+            reverse("panel:admin_driver_messages"),
             reverse("panel:advertisements"),
             reverse("panel:admin_profile"),
             reverse("panel:settings"),

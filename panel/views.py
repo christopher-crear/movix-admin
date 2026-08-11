@@ -1,46 +1,61 @@
 import csv
 import json
+import mimetypes
 import uuid
-from datetime import datetime
-from urllib.parse import quote
+from datetime import datetime, timedelta
+from decimal import Decimal
+from urllib.parse import urlencode
 
 import requests
 from django.conf import settings
 from django.contrib import messages
-from django.contrib.auth import update_session_auth_hash
+from django.contrib.auth import authenticate, login as django_login, logout as django_logout, update_session_auth_hash
 from django.contrib.auth.forms import PasswordChangeForm
 from django.contrib.auth.models import User
 from django.core.cache import cache
-from django.core.exceptions import ValidationError
+from django.core.files.base import ContentFile
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.db import DatabaseError
-from django.db.models import Count, Q
-from django.db.models.functions import TruncMonth
+from django.db.models import Avg, Count, DecimalField, Q, Sum
+from django.db.models.functions import Coalesce, TruncDate, TruncMonth
 from django.http import Http404, HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.html import escape
+from django.views.decorators.clickjacking import xframe_options_sameorigin
 from django.views.decorators.http import require_POST
 
-from .decorators import admin_required
+from .decorators import admin_required, driver_portal_required
 from .forms import (
     AdminProfileForm,
     AdvertisementForm,
     ContactResponseForm,
+    DriverBlockForm,
+    DriverInboxMessageForm,
+    DriverMonthlyPaymentForm,
+    DriverSelfProfileForm,
     NotificationForm,
+    PaymentBankAccountForm,
     PublicContactForm,
     ProfileCreateForm,
     ProfileForm,
     SettingsForm,
+    SupabasePasswordChangeForm,
 )
 from .models import (
     AdminProfile,
     Advertisement,
     AuditLog,
     ContactRequest,
+    DriverInboxMessage,
+    DriverInvoice,
+    DriverMonthlyPayment,
     DriverReview,
     Notification,
     NotificationCampaign,
+    PaymentBankAccount,
     Profile,
     Ride,
     SystemSetting,
@@ -48,18 +63,25 @@ from .models import (
 from .services import (
     active_tokens_for_users,
     audit,
+    build_monthly_invoice_pdf,
     create_supabase_auth_user,
     delete_storage_object,
     delete_supabase_auth_user,
     is_safe_media_url,
     resolve_media_url,
+    send_movix_email,
     send_push_notifications,
+    supabase_password_sign_in,
+    supabase_update_password,
+    supabase_user_from_token,
     upload_to_supabase,
 )
 
 
 CLIENT_ROLES = ["cliente", "client", "usuario"]
 DRIVER_ROLES = ["conductor", "driver", "transportista"]
+COMPLETED_RIDE_STATUSES = ["completada", "completado", "completed", "finalizada", "finalizado"]
+CANCELLED_RIDE_STATUSES = ["cancelada", "cancelado", "cancelled", "canceled"]
 DOCUMENT_FIELDS = {
     "identification": ("identification_photo_url", "Cédula de identidad"),
     "profile": ("profile_photo_url", "Foto de perfil"),
@@ -68,11 +90,43 @@ DOCUMENT_FIELDS = {
     "registration": ("registration_photo_url", "Matrícula vehicular"),
     "insurance": ("insurance_photo_url", "Seguro vehicular"),
 }
+PUBLIC_DOCUMENT_KEYS = {"profile", "vehicle"}
 
 REVERIFICATION_FIELDS = {
     "identification_number", "license_number", "vehicle_plate", "vehicle_year",
     "vehicle_type", "identification_file", "license_file", "registration_file", "insurance_file",
 }
+
+
+def _profile_document_items(profile, keys=None):
+    """Construye una lista uniforme para todas las previsualizaciones."""
+    allowed_keys = set(keys) if keys else None
+    documents = []
+    for key, (field_name, label) in DOCUMENT_FIELDS.items():
+        if allowed_keys is not None and key not in allowed_keys:
+            continue
+        if not profile.is_driver and key in {"vehicle", "license", "registration", "insurance"}:
+            continue
+        value = getattr(profile, field_name, "")
+        if key == "profile" and not value:
+            value = profile.avatar_url
+        if not value:
+            status, status_label = "missing", "Sin archivo"
+        elif key == "license":
+            status, status_label = ("approved", "Verificado") if profile.license_verified else ("pending", "Pendiente")
+        elif key == "registration":
+            status, status_label = ("approved", "Verificado") if profile.registration_verified else ("pending", "Pendiente")
+        elif key == "insurance":
+            status, status_label = ("approved", "Verificado") if profile.insurance_verified else ("pending", "Pendiente")
+        elif key == "identification":
+            status = profile.effective_verification_status
+            status_label = profile.verification_label
+        else:
+            status, status_label = "uploaded", "Cargado"
+        if value and profile.effective_verification_status == "rejected" and key not in {"profile", "vehicle"}:
+            status, status_label = "rejected", "Rechazado"
+        documents.append({"key": key, "label": label, "value": value, "status": status, "status_label": status_label})
+    return documents
 
 
 def landing(request):
@@ -109,6 +163,924 @@ def landing(request):
 def demo_app(request):
     """Simulación pública y aislada del flujo móvil de MOVIX."""
     return render(request, "demo.html")
+
+
+def _portal_profile_from_auth(request, auth_user, auth_payload):
+    """Crea una sesión web usando la identidad ya verificada por Supabase."""
+    user_id = auth_user.get("id")
+    email = (auth_user.get("email") or "").strip()
+    if not user_id:
+        raise ValidationError("Supabase no devolvió el identificador de la cuenta.")
+    profile = Profile.objects.filter(pk=user_id).first()
+    if not profile:
+        raise ValidationError("La cuenta existe en Supabase Auth, pero todavía no tiene un perfil en MOVIX.")
+    if not profile.is_active:
+        raise ValidationError("Tu cuenta está bloqueada. Comunícate con soporte MOVIX.")
+
+    # La coincidencia de correo nunca concede permisos administrativos. El rol
+    # de la identidad de Supabase es la fuente de verdad para este flujo.
+    profile_role = (profile.role or "").strip().lower()
+    if profile_role in {"admin", "administrator", "administrador"}:
+        staff_user = User.objects.filter(
+            email__iexact=email,
+            is_staff=True,
+            is_active=True,
+        ).first() if email else None
+        if not staff_user:
+            raise ValidationError(
+                "El perfil indica un rol administrativo, pero no existe una cuenta administrativa habilitada en Django."
+            )
+        django_login(request, staff_user, backend="django.contrib.auth.backends.ModelBackend")
+        return reverse("panel:dashboard")
+
+    if not profile.is_driver:
+        raise ValidationError("Este portal web está disponible para transportistas. Los clientes continúan usando la app MOVIX.")
+
+    request.session.cycle_key()
+    request.session["portal_profile_id"] = str(profile.id)
+    request.session["portal_role"] = "transportista"
+    request.session["portal_access_token"] = auth_payload.get("access_token", "")
+    request.session["portal_refresh_token"] = auth_payload.get("refresh_token", "")
+    request.session.set_expiry(60 * 60 * 12)
+    return reverse("panel:driver_dashboard")
+
+
+def access_login(request):
+    """Login único: administradores Django y cuentas reales de Supabase."""
+    if request.user.is_authenticated and request.user.is_staff:
+        return redirect("panel:dashboard")
+    if request.session.get("portal_profile_id"):
+        return redirect("panel:driver_dashboard")
+
+    google_callback = request.build_absolute_uri(reverse("panel:auth_callback"))
+    google_url = ""
+    if settings.SUPABASE_URL:
+        google_url = f"{settings.SUPABASE_URL}/auth/v1/authorize?{urlencode({'provider': 'google', 'redirect_to': google_callback})}"
+
+    if request.method == "POST":
+        identifier = request.POST.get("username", "").strip()
+        password = request.POST.get("password", "")
+
+        # Si el correo pertenece a un transportista activo, se valida primero
+        # contra Supabase. Así un correo repetido en auth_user de Django no
+        # convierte accidentalmente al transportista en administrador.
+        prefer_driver_role = False
+        if "@" in identifier:
+            driver_role_filter = Q()
+            for role in DRIVER_ROLES:
+                driver_role_filter |= Q(role__iexact=role)
+            prefer_driver_role = Profile.objects.filter(
+                email__iexact=identifier,
+                is_active=True,
+            ).filter(driver_role_filter).exists()
+
+        if prefer_driver_role:
+            try:
+                payload = supabase_password_sign_in(identifier, password)
+                destination = _portal_profile_from_auth(request, payload.get("user") or {}, payload)
+                return redirect(destination)
+            except (ValidationError, DatabaseError) as exc:
+                messages.error(request, str(exc))
+            return render(request, "registration/login.html", {"google_url": google_url})
+
+        # Mantiene compatible el acceso creado con `createsuperuser`.
+        django_username = identifier
+        if "@" in identifier:
+            staff_match = User.objects.filter(email__iexact=identifier, is_staff=True).first()
+            if staff_match:
+                django_username = staff_match.username
+        django_user = authenticate(request, username=django_username, password=password)
+        if django_user and django_user.is_staff:
+            django_login(request, django_user)
+            return redirect(request.POST.get("next") or "panel:dashboard")
+
+        # Para usuarios de la app, el identificador debe ser el correo real.
+        if "@" not in identifier:
+            messages.error(request, "Para ingresar como transportista escribe el correo registrado en MOVIX.")
+        else:
+            try:
+                payload = supabase_password_sign_in(identifier, password)
+                destination = _portal_profile_from_auth(request, payload.get("user") or {}, payload)
+                return redirect(destination)
+            except (ValidationError, DatabaseError) as exc:
+                messages.error(request, str(exc))
+
+    return render(request, "registration/login.html", {"google_url": google_url})
+
+
+def auth_callback(request):
+    """Página puente: el token de Google llega en el fragmento del navegador."""
+    return render(request, "registration/auth_callback.html")
+
+
+@require_POST
+def auth_session(request):
+    access_token = request.POST.get("access_token", "").strip()
+    refresh_token = request.POST.get("refresh_token", "").strip()
+    if not access_token:
+        messages.error(request, "Google no devolvió una sesión válida.")
+        return redirect("login")
+    try:
+        auth_user = supabase_user_from_token(access_token)
+        destination = _portal_profile_from_auth(
+            request,
+            auth_user,
+            {"access_token": access_token, "refresh_token": refresh_token},
+        )
+        return redirect(destination)
+    except (ValidationError, DatabaseError) as exc:
+        messages.error(request, str(exc))
+        return redirect("login")
+
+
+@require_POST
+def access_logout(request):
+    request.session.pop("portal_profile_id", None)
+    request.session.pop("portal_role", None)
+    request.session.pop("portal_access_token", None)
+    request.session.pop("portal_refresh_token", None)
+    if request.user.is_authenticated:
+        django_logout(request)
+    return redirect("login")
+
+
+def _current_driver(request):
+    profile_id = request.session.get("portal_profile_id")
+    profile = Profile.objects.filter(pk=profile_id).first() if profile_id else None
+    if not profile or not profile.is_driver or not profile.is_active:
+        request.session.pop("portal_profile_id", None)
+        raise PermissionDenied("La sesión no corresponde a un transportista activo.")
+    return profile
+
+
+def _ride_earnings(queryset):
+    amount = queryset.aggregate(
+        total=Sum(
+            Coalesce("driver_price", "price"),
+            output_field=DecimalField(max_digits=14, decimal_places=2),
+        )
+    )["total"]
+    return amount or Decimal("0")
+
+
+def _driver_common_context(driver):
+    avatar_value = driver.profile_photo_url or driver.avatar_url
+    return {
+        "driver": driver,
+        "driver_avatar_url": resolve_media_url(
+            avatar_value,
+            expires=900,
+            preferred_buckets=(settings.SUPABASE_PUBLIC_BUCKET, settings.SUPABASE_PRIVATE_BUCKET),
+        ) if avatar_value else "",
+    }
+
+
+@driver_portal_required
+def driver_dashboard(request):
+    driver = _current_driver(request)
+    rides = Ride.objects.filter(driver=driver)
+    completed = rides.filter(status__in=COMPLETED_RIDE_STATUSES)
+    today = timezone.localdate()
+    week_start = today - timedelta(days=today.weekday())
+    previous_week_start = week_start - timedelta(days=7)
+    weekly_rides = completed.filter(completed_at__date__gte=week_start)
+    previous_week_rides = completed.filter(
+        completed_at__date__gte=previous_week_start,
+        completed_at__date__lt=week_start,
+    )
+    weekly_earnings = _ride_earnings(weekly_rides)
+    previous_earnings = _ride_earnings(previous_week_rides)
+    if previous_earnings:
+        weekly_change = round(((weekly_earnings - previous_earnings) / previous_earnings) * 100)
+    else:
+        weekly_change = 100 if weekly_earnings else 0
+
+    days = [today - timedelta(days=offset) for offset in range(6, -1, -1)]
+    daily_rows = completed.filter(completed_at__date__gte=days[0]).annotate(day=TruncDate("completed_at")).values("day").annotate(
+        total=Sum(Coalesce("driver_price", "price"), output_field=DecimalField(max_digits=14, decimal_places=2))
+    )
+    daily_map = {row["day"]: row["total"] or Decimal("0") for row in daily_rows}
+    max_daily = max([daily_map.get(day, Decimal("0")) for day in days] or [Decimal("0")])
+    day_names = ["L", "M", "M", "J", "V", "S", "D"]
+    daily_bars = []
+    for day in days:
+        value = daily_map.get(day, Decimal("0"))
+        height = 18 if not max_daily else max(18, round(float(value / max_daily) * 100))
+        daily_bars.append({"label": day_names[day.weekday()], "value": value, "height": height, "is_today": day == today})
+
+    review_stats = DriverReview.objects.filter(driver=driver).aggregate(average=Avg("rating"), total=Count("id"))
+    distance = completed.aggregate(total=Sum("distance_km"))["total"] or Decimal("0")
+    context = {
+        **_driver_common_context(driver),
+        "weekly_earnings": weekly_earnings,
+        "weekly_change": weekly_change,
+        "daily_bars": daily_bars,
+        "today_trips": completed.filter(completed_at__date=today).count(),
+        "today_earnings": _ride_earnings(completed.filter(completed_at__date=today)),
+        "distance": distance,
+        "average_rating": review_stats["average"] or driver.rating or 0,
+        "review_count": review_stats["total"],
+        "accepted_count": rides.count(),
+        "completed_count": completed.count(),
+        "recent_rides": rides.select_related("client").order_by("-created_at")[:5],
+    }
+    return render(request, "driver/dashboard.html", context)
+
+
+@driver_portal_required
+def driver_rides(request):
+    driver = _current_driver(request)
+    queryset = Ride.objects.filter(driver=driver).select_related("client").order_by("-created_at")
+    query = request.GET.get("q", "").strip()
+    status = request.GET.get("status", "all")
+    if query:
+        queryset = queryset.filter(Q(origin_address__icontains=query) | Q(destination_address__icontains=query) | Q(cargo_description__icontains=query))
+    if status == "completed":
+        queryset = queryset.filter(status__in=COMPLETED_RIDE_STATUSES)
+    elif status == "cancelled":
+        queryset = queryset.filter(status__in=CANCELLED_RIDE_STATUSES)
+    elif status == "active":
+        queryset = queryset.exclude(status__in=COMPLETED_RIDE_STATUSES + CANCELLED_RIDE_STATUSES)
+    page = Paginator(queryset, 10).get_page(request.GET.get("page"))
+    context = {**_driver_common_context(driver), "page": page, "query": query, "status": status}
+    return render(request, "driver/rides.html", context)
+
+
+@driver_portal_required
+def driver_ride_detail(request, ride_id):
+    driver = _current_driver(request)
+    ride = get_object_or_404(Ride.objects.select_related("client"), pk=ride_id, driver=driver)
+    review = DriverReview.objects.filter(ride=ride, driver=driver).select_related("client").first()
+    client_photo = ride.client.profile_photo_url or ride.client.avatar_url
+    context = {
+        **_driver_common_context(driver),
+        "ride": ride,
+        "review": review,
+        "client_avatar_url": resolve_media_url(
+            client_photo,
+            expires=900,
+            preferred_buckets=(settings.SUPABASE_PUBLIC_BUCKET, settings.SUPABASE_PRIVATE_BUCKET),
+        ) if client_photo else "",
+    }
+    return render(request, "driver/ride_detail.html", context)
+
+
+@driver_portal_required
+def driver_reviews(request):
+    driver = _current_driver(request)
+    queryset = DriverReview.objects.filter(driver=driver).select_related("client", "ride")
+    page = Paginator(queryset, 10).get_page(request.GET.get("page"))
+    stats = queryset.aggregate(average=Avg("rating"), total=Count("id"))
+    distribution_rows = queryset.values("rating").annotate(total=Count("id"))
+    distribution_map = {row["rating"]: row["total"] for row in distribution_rows}
+    distribution = [{"stars": value, "total": distribution_map.get(value, 0)} for value in range(5, 0, -1)]
+    context = {
+        **_driver_common_context(driver),
+        "page": page,
+        "average_rating": stats["average"] or driver.rating or 0,
+        "review_total": stats["total"],
+        "distribution": distribution,
+    }
+    return render(request, "driver/reviews.html", context)
+
+
+@driver_portal_required
+def driver_profile(request):
+    driver = _current_driver(request)
+    action = request.POST.get("action", "")
+    editing = request.GET.get("editar") == "1" or action == "profile"
+    profile_form = DriverSelfProfileForm(request.POST or None, request.FILES or None, instance=driver)
+    password_form = SupabasePasswordChangeForm(
+        request.POST if action == "password" else None
+    )
+
+    if request.method == "POST" and action == "profile" and profile_form.is_valid():
+        replacements = []
+        try:
+            changed_files = {
+                name
+                for name in ["identification_file", "license_file", "registration_file", "insurance_file"]
+                if profile_form.cleaned_data.get(name)
+            }
+            driver = profile_form.save(commit=False)
+            replacements = _upload_profile_files(driver, profile_form, "drivers")
+            driver.updated_at = timezone.now()
+            if changed_files:
+                driver.profile_verified = False
+                driver.verified = False
+                driver.verification_status = "pending"
+                driver.verified_at = None
+            driver.save()
+            _finish_file_replacements(replacements, saved=True)
+            messages.success(request, "Tu perfil fue actualizado correctamente.")
+            return redirect("panel:driver_profile")
+        except (ValidationError, DatabaseError) as exc:
+            _finish_file_replacements(replacements, saved=False)
+            profile_form.add_error(None, exc)
+
+    if request.method == "POST" and action == "password" and password_form.is_valid():
+        token = request.session.get("portal_access_token", "")
+        if not token:
+            password_form.add_error(None, "Vuelve a iniciar sesión para cambiar tu contraseña.")
+        else:
+            try:
+                supabase_update_password(token, password_form.cleaned_data["new_password"])
+                messages.success(request, "Tu contraseña de Supabase fue actualizada.")
+                return redirect("panel:driver_profile")
+            except ValidationError as exc:
+                password_form.add_error(None, exc)
+
+    context = {
+        **_driver_common_context(driver),
+        "editing": editing,
+        "profile_form": profile_form,
+        "password_form": password_form,
+        "ride_count": Ride.objects.filter(driver=driver).count(),
+        "review_stats": DriverReview.objects.filter(driver=driver).aggregate(average=Avg("rating"), total=Count("id")),
+        "documents": _profile_document_items(driver),
+    }
+    return render(request, "driver/profile.html", context)
+
+
+@driver_portal_required
+def driver_payments(request):
+    driver = _current_driver(request)
+    current_period = timezone.localdate().replace(day=1)
+    bank_accounts = list(PaymentBankAccount.objects.filter(is_active=True))
+    form = DriverMonthlyPaymentForm(
+        request.POST or None,
+        request.FILES or None,
+        initial={"period": current_period},
+        bank_accounts=bank_accounts,
+    )
+    if request.method == "POST" and form.is_valid():
+        period = form.cleaned_data["period"]
+        if DriverMonthlyPayment.objects.filter(driver=driver, period=period).exists():
+            form.add_error("period", "Ya registraste un pago para este mes. El administrador debe revisarlo.")
+        else:
+            receipt_value = ""
+            try:
+                receipt = form.cleaned_data.get("receipt")
+                if receipt:
+                    receipt_value = upload_to_supabase(
+                        receipt,
+                        folder=f"monthly-payments/{driver.id}/{period:%Y-%m}",
+                        public=False,
+                        images_only=False,
+                    )
+                payment = form.save(commit=False)
+                payment.id = uuid.uuid4()
+                payment.driver = driver
+                payment.receipt_url = receipt_value or None
+                payment.status = DriverMonthlyPayment.STATUS_PENDING
+                payment.created_at = timezone.now()
+                payment.updated_at = payment.created_at
+                payment.save(force_insert=True)
+                if payment.payment_method == "cash":
+                    messages.success(request, "Pago físico registrado. El administrador confirmará la recepción del dinero.")
+                else:
+                    messages.success(request, "Comprobante enviado. El administrador revisará tu mensualidad.")
+                return redirect("panel:driver_payments")
+            except (ValidationError, DatabaseError) as exc:
+                if receipt_value:
+                    delete_storage_object(receipt_value)
+                form.add_error(None, exc)
+
+    payment_status = request.GET.get("status", "all")
+    history = DriverMonthlyPayment.objects.filter(driver=driver).select_related("invoice")
+    if payment_status in {"pending", "approved", "rejected"}:
+        history = history.filter(status=payment_status)
+    bank_cards = []
+    for account in bank_accounts:
+        logo_url = ""
+        if account.logo_url:
+            logo_url = reverse("panel:payment_bank_asset", kwargs={"bank_id": account.id, "asset": "logo", "action": "view"})
+        bank_cards.append({"account": account, "logo_url": logo_url})
+    page = Paginator(history, 8).get_page(request.GET.get("page"))
+    return render(request, "driver/payments.html", {
+        **_driver_common_context(driver),
+        "form": form,
+        "page": page,
+        "payment_status": payment_status,
+        "current_payment": DriverMonthlyPayment.objects.filter(driver=driver, period=current_period).first(),
+        "bank_cards": bank_cards,
+    })
+
+
+@driver_portal_required
+def driver_invoices(request):
+    """Listado privado de las facturas emitidas al transportista autenticado."""
+    driver = _current_driver(request)
+    query = request.GET.get("q", "").strip()
+    year = request.GET.get("year", "all").strip()
+    base_queryset = DriverInvoice.objects.filter(driver=driver).select_related("payment")
+    queryset = base_queryset
+
+    if query:
+        queryset = queryset.filter(
+            Q(invoice_number__icontains=query)
+            | Q(bank__icontains=query)
+            | Q(payment_method__icontains=query)
+        )
+    if year.isdigit():
+        queryset = queryset.filter(period__year=int(year))
+
+    years = list(
+        base_queryset.order_by("-period__year")
+        .values_list("period__year", flat=True)
+        .distinct()
+    )
+    totals = base_queryset.aggregate(
+        count=Count("id"),
+        amount=Coalesce(
+            Sum("amount"),
+            Decimal("0.00"),
+            output_field=DecimalField(max_digits=12, decimal_places=2),
+        ),
+    )
+    current_year = timezone.localdate().year
+    page = Paginator(queryset, 9).get_page(request.GET.get("page"))
+    return render(request, "driver/invoices.html", {
+        **_driver_common_context(driver),
+        "page": page,
+        "query": query,
+        "year": year,
+        "years": years,
+        "invoice_count": totals["count"],
+        "total_invoiced": totals["amount"],
+        "current_year": current_year,
+        "current_year_count": base_queryset.filter(period__year=current_year).count(),
+    })
+
+
+@admin_required
+def monthly_payment_list(request):
+    query = request.GET.get("q", "").strip()
+    status = request.GET.get("status", "all")
+    bank_filter = request.GET.get("bank", "all")
+    period_value = request.GET.get("period", "").strip()
+    try:
+        current_period = datetime.strptime(period_value, "%Y-%m").date().replace(day=1) if period_value else timezone.localdate().replace(day=1)
+    except ValueError:
+        current_period = timezone.localdate().replace(day=1)
+    drivers = _profile_queryset("drivers").order_by("first_name", "last_name")
+    if query:
+        drivers = drivers.filter(
+            Q(first_name__icontains=query) | Q(last_name__icontains=query)
+            | Q(email__icontains=query) | Q(identification_number__icontains=query)
+            | Q(cedula__icontains=query)
+        )
+    current_payments = {
+        payment.driver_id: payment
+        for payment in DriverMonthlyPayment.objects.filter(period=current_period)
+    }
+    rows = []
+    for driver in drivers:
+        payment = current_payments.get(driver.id)
+        row_status = payment.status if payment else "unpaid"
+        if status != "all" and row_status != status:
+            continue
+        if bank_filter != "all" and (not payment or payment.bank != bank_filter):
+            continue
+        avatar_value = driver.profile_photo_url or driver.avatar_url
+        rows.append({
+            "driver": driver,
+            "payment": payment,
+            "status": row_status,
+            "avatar_url": resolve_media_url(
+                avatar_value, expires=900,
+                preferred_buckets=(settings.SUPABASE_PUBLIC_BUCKET, settings.SUPABASE_PRIVATE_BUCKET),
+            ) if avatar_value else "",
+        })
+    page = Paginator(rows, 10).get_page(request.GET.get("page"))
+    counts = {
+        "all": len(current_payments),
+        "pending": sum(1 for p in current_payments.values() if p.status == "pending"),
+        "approved": sum(1 for p in current_payments.values() if p.status == "approved"),
+        "rejected": sum(1 for p in current_payments.values() if p.status == "rejected"),
+        "unpaid": max(0, drivers.count() - len(current_payments)),
+    }
+    return render(request, "payments/list.html", {
+        "page": page, "query": query, "status": status, "counts": counts,
+        "period": current_period, "period_value": current_period.strftime("%Y-%m"),
+        "bank_filter": bank_filter,
+        "banks": PaymentBankAccount.objects.filter(is_active=True),
+        "block_form": DriverBlockForm(),
+    })
+
+
+@admin_required
+def monthly_payment_detail(request, payment_id):
+    payment = get_object_or_404(DriverMonthlyPayment.objects.select_related("driver"), pk=payment_id)
+    avatar_value = payment.driver.profile_photo_url or payment.driver.avatar_url
+    invoice = DriverInvoice.objects.filter(payment=payment).first()
+    return render(request, "payments/detail.html", {
+        "payment": payment,
+        "driver": payment.driver,
+        "driver_avatar_url": resolve_media_url(
+            avatar_value, expires=900,
+            preferred_buckets=(settings.SUPABASE_PUBLIC_BUCKET, settings.SUPABASE_PRIVATE_BUCKET),
+        ) if avatar_value else "",
+        "invoice": invoice,
+        "block_form": DriverBlockForm(initial={"reason": payment.driver.blocked_reason or ""}),
+    })
+
+
+@admin_required
+@require_POST
+def monthly_payment_review(request, payment_id, decision):
+    payment = get_object_or_404(DriverMonthlyPayment.objects.select_related("driver"), pk=payment_id)
+    if decision not in {"approve", "reject"}:
+        raise Http404
+    if decision == "reject" and not request.POST.get("notes", "").strip():
+        messages.error(request, "Escribe el motivo del rechazo.")
+        return redirect("panel:monthly_payment_detail", payment_id=payment.id)
+    payment.status = DriverMonthlyPayment.STATUS_APPROVED if decision == "approve" else DriverMonthlyPayment.STATUS_REJECTED
+    payment.admin_notes = request.POST.get("notes", "").strip() or None
+    payment.reviewed_by = request.user.username
+    payment.reviewed_at = timezone.now()
+    payment.updated_at = payment.reviewed_at
+    payment.save(update_fields=["status", "admin_notes", "reviewed_by", "reviewed_at", "updated_at"])
+    title = "Mensualidad aprobada" if decision == "approve" else "Mensualidad rechazada"
+    message = (
+        f"Tu mensualidad de {payment.period:%m/%Y} fue aprobada."
+        if decision == "approve"
+        else f"Tu mensualidad de {payment.period:%m/%Y} fue rechazada: {payment.admin_notes}"
+    )
+    _notify_profile(payment.driver, title, message, "monthly_payment")
+    audit(request, decision, "driver_monthly_payment", message, payment.id)
+    messages.success(request, message)
+    return redirect("panel:monthly_payment_detail", payment_id=payment.id)
+
+
+@admin_required
+@require_POST
+def monthly_payment_physical(request, profile_id):
+    driver = get_object_or_404(_profile_queryset("drivers"), pk=profile_id)
+    period = timezone.localdate().replace(day=1)
+    try:
+        amount = Decimal(request.POST.get("amount", "0"))
+    except Exception:
+        amount = Decimal("0")
+    if amount <= 0:
+        messages.error(request, "Indica el valor recibido para registrar el pago físico.")
+        return redirect("panel:monthly_payment_list")
+    payment, created = DriverMonthlyPayment.objects.get_or_create(
+        driver=driver,
+        period=period,
+        defaults={
+            "id": uuid.uuid4(), "bank": "physical", "payment_method": "cash", "amount": amount,
+            "status": DriverMonthlyPayment.STATUS_APPROVED, "reviewed_by": request.user.username,
+            "reviewed_at": timezone.now(), "created_at": timezone.now(), "updated_at": timezone.now(),
+        },
+    )
+    if not created:
+        payment.status = DriverMonthlyPayment.STATUS_APPROVED
+        payment.bank = "physical"
+        payment.payment_method = "cash"
+        payment.amount = amount
+        payment.reviewed_by = request.user.username
+        payment.reviewed_at = timezone.now()
+        payment.updated_at = payment.reviewed_at
+        payment.save(update_fields=["status", "bank", "payment_method", "amount", "reviewed_by", "reviewed_at", "updated_at"])
+    _notify_profile(driver, "Mensualidad registrada", f"Tu pago físico de {period:%m/%Y} fue registrado.", "monthly_payment")
+    messages.success(request, "Pago físico registrado y aprobado.")
+    return redirect("panel:monthly_payment_list")
+
+
+def _notify_profile(profile, title, message, notification_type):
+    now = timezone.now()
+    Notification.objects.create(
+        id=uuid.uuid4(), user=profile, type=notification_type,
+        title=title, message=message, is_read=False, created_at=now,
+    )
+    tokens = active_tokens_for_users([profile.id])
+    send_push_notifications(tokens, title, message, {"type": notification_type})
+
+
+@admin_required
+@require_POST
+def driver_payment_block(request, profile_id, action):
+    driver = get_object_or_404(_profile_queryset("drivers"), pk=profile_id)
+    if action == "unblock":
+        driver.is_active = True
+        driver.blocked_at = None
+        driver.blocked_reason = None
+        message = "Tu cuenta MOVIX fue habilitada nuevamente."
+        title = "Cuenta habilitada"
+    elif action == "block":
+        form = DriverBlockForm(request.POST)
+        if not form.is_valid():
+            messages.error(request, "Debes indicar el motivo del bloqueo.")
+            return redirect(request.META.get("HTTP_REFERER") or "panel:monthly_payment_list")
+        driver.is_active = False
+        driver.blocked_at = timezone.now()
+        driver.blocked_reason = form.cleaned_data["reason"]
+        title = "Cuenta bloqueada"
+        message = f"Tu cuenta MOVIX fue bloqueada. Motivo: {driver.blocked_reason}"
+    else:
+        raise Http404
+    driver.updated_at = timezone.now()
+    driver.save(update_fields=["is_active", "blocked_at", "blocked_reason", "updated_at"])
+    _notify_profile(driver, title, message, "account_status")
+    audit(request, action, "profile", message, driver.id)
+    messages.success(request, message)
+    return redirect(request.META.get("HTTP_REFERER") or "panel:monthly_payment_list")
+
+
+@admin_required
+def payment_bank_accounts(request):
+    edit_id = request.GET.get("editar") or request.POST.get("bank_id")
+    instance = get_object_or_404(PaymentBankAccount, pk=edit_id) if edit_id else None
+    form = PaymentBankAccountForm(request.POST or None, request.FILES or None, instance=instance)
+    if request.method == "POST" and form.is_valid():
+        uploaded_values = []
+        replacements = []
+        try:
+            account = form.save(commit=False)
+            account.id = account.id or uuid.uuid4()
+            account.created_at = account.created_at or timezone.now()
+            account.updated_at = timezone.now()
+            for field_name, model_field, public in (
+                ("logo_file", "logo_url", True),
+                ("qr_file", "qr_url", False),
+            ):
+                uploaded = form.cleaned_data.get(field_name)
+                if not uploaded:
+                    continue
+                old_value = getattr(account, model_field, "")
+                value = upload_to_supabase(
+                    uploaded,
+                    folder=f"payment-banks/{account.code}/{field_name}",
+                    public=public,
+                    images_only=True,
+                )
+                setattr(account, model_field, value)
+                uploaded_values.append(value)
+                replacements.append(old_value)
+            account.save(force_insert=instance is None)
+            for old_value in replacements:
+                delete_storage_object(old_value)
+            audit(request, "update" if instance else "create", "payment_bank", f"Configuró {account.name}", account.id)
+            messages.success(request, f"Los datos de {account.name} fueron guardados.")
+            return redirect("panel:payment_bank_accounts")
+        except (ValidationError, DatabaseError) as exc:
+            for value in uploaded_values:
+                delete_storage_object(value)
+            form.add_error(None, exc)
+    accounts = list(PaymentBankAccount.objects.all())
+    return render(request, "payments/banks.html", {
+        "form": form,
+        "editing_bank": instance,
+        "accounts": accounts,
+    })
+
+
+@admin_required
+@require_POST
+def payment_bank_toggle(request, bank_id):
+    account = get_object_or_404(PaymentBankAccount, pk=bank_id)
+    account.is_active = not account.is_active
+    account.updated_at = timezone.now()
+    account.save(update_fields=["is_active", "updated_at"])
+    messages.success(request, f"{account.name} ahora está {'visible' if account.is_active else 'oculto'} para los transportistas.")
+    return redirect("panel:payment_bank_accounts")
+
+
+def _storage_value_response(value, action, fallback_name, preferred_buckets):
+    if action not in {"view", "download"} or not value or not is_safe_media_url(value):
+        raise Http404
+    url = resolve_media_url(value, expires=300, preferred_buckets=preferred_buckets)
+    if not url:
+        raise Http404("No se encontró el archivo en Supabase Storage.")
+    try:
+        upstream = requests.get(url, stream=True, timeout=(8, 40), allow_redirects=True)
+        upstream.raise_for_status()
+    except requests.RequestException as exc:
+        raise Http404("Supabase no pudo entregar el archivo.") from exc
+    filename = str(value).split("?", 1)[0].rstrip("/").split("/")[-1] or fallback_name
+    content_type = (upstream.headers.get("Content-Type") or mimetypes.guess_type(filename)[0] or "application/octet-stream").split(";", 1)[0]
+
+    def stream_file():
+        try:
+            yield from upstream.iter_content(chunk_size=64 * 1024)
+        finally:
+            upstream.close()
+
+    response = StreamingHttpResponse(stream_file(), content_type=content_type)
+    response["Content-Disposition"] = f'{"attachment" if action == "download" else "inline"}; filename="{filename.replace(chr(34), "")}"'
+    response["Cache-Control"] = "private, max-age=60" if action == "view" else "no-store"
+    if upstream.headers.get("Content-Length"):
+        response["Content-Length"] = upstream.headers["Content-Length"]
+    return response
+
+
+@xframe_options_sameorigin
+def payment_bank_asset(request, bank_id, asset, action="view"):
+    is_admin = request.user.is_authenticated and request.user.is_staff
+    is_driver = bool(request.session.get("portal_profile_id"))
+    if not is_admin and not is_driver:
+        raise PermissionDenied("Inicia sesión para consultar los datos bancarios.")
+    account = get_object_or_404(PaymentBankAccount, pk=bank_id)
+    if asset == "logo":
+        value = account.logo_url
+        preferred = (settings.SUPABASE_PUBLIC_BUCKET, settings.SUPABASE_PRIVATE_BUCKET)
+    elif asset == "qr":
+        value = account.qr_url
+        preferred = (settings.SUPABASE_PRIVATE_BUCKET, settings.SUPABASE_PUBLIC_BUCKET)
+    else:
+        raise Http404
+    return _storage_value_response(value, action, f"{account.code}-{asset}", preferred)
+
+
+@admin_required
+@require_POST
+def monthly_payment_invoice(request, payment_id):
+    payment = get_object_or_404(DriverMonthlyPayment.objects.select_related("driver"), pk=payment_id)
+    if payment.status != DriverMonthlyPayment.STATUS_APPROVED:
+        messages.error(request, "Primero debes aprobar la mensualidad.")
+        return redirect("panel:monthly_payment_detail", payment_id=payment.id)
+    if not payment.amount or payment.amount <= 0:
+        messages.error(request, "Registra un valor mayor a cero antes de generar la factura.")
+        return redirect("panel:monthly_payment_detail", payment_id=payment.id)
+    number = f"MOVIX-{payment.period:%Y%m}-{str(payment.id).replace('-', '')[:8].upper()}"
+    invoice, created = DriverInvoice.objects.get_or_create(
+        payment=payment,
+        defaults={
+            "id": uuid.uuid4(),
+            "invoice_number": number,
+            "driver": payment.driver,
+            "customer_name": payment.driver.full_name,
+            "customer_email": payment.driver.email,
+            "customer_identification": payment.driver.identity,
+            "period": payment.period,
+            "amount": payment.amount,
+            "bank": payment.bank_label,
+            "payment_method": payment.method_label,
+            "status": "issued",
+            "issued_at": timezone.now(),
+            "created_by": request.user.username,
+            "created_at": timezone.now(),
+            "updated_at": timezone.now(),
+        },
+    )
+    try:
+        pdf_bytes = build_monthly_invoice_pdf(invoice)
+        if not invoice.pdf_url:
+            pdf_file = ContentFile(pdf_bytes, name=f"{invoice.invoice_number}.pdf")
+            pdf_file.content_type = "application/pdf"
+            invoice.pdf_url = upload_to_supabase(
+                pdf_file,
+                folder=f"monthly-invoices/{invoice.driver_id}/{invoice.period:%Y-%m}",
+                public=False,
+                images_only=False,
+            )
+        email_sent, email_error = send_movix_email(
+            invoice.customer_email,
+            f"Factura de mensualidad {invoice.invoice_number}",
+            f"Hola {invoice.customer_name}, adjuntamos tu factura de la mensualidad {invoice.period:%m/%Y} por USD {invoice.amount:.2f}.",
+            f"{invoice.invoice_number}.pdf",
+            pdf_bytes,
+        )
+        invoice.emailed_at = timezone.now() if email_sent else invoice.emailed_at
+        invoice.updated_at = timezone.now()
+        invoice.save(update_fields=["pdf_url", "emailed_at", "updated_at"])
+        inbox, _ = DriverInboxMessage.objects.get_or_create(
+            invoice=invoice,
+            message_type="invoice",
+            defaults={
+                "id": uuid.uuid4(),
+                "driver": invoice.driver,
+                "title": f"Factura {invoice.invoice_number}",
+                "body": f"Tu mensualidad de {invoice.period:%m/%Y} fue facturada correctamente.",
+                "details": {"period": invoice.period.isoformat(), "amount": str(invoice.amount), "invoice_number": invoice.invoice_number},
+                "is_read": False,
+                "emailed_at": invoice.emailed_at,
+                "created_by": request.user.username,
+                "created_at": timezone.now(),
+            },
+        )
+        _notify_profile(invoice.driver, "Factura disponible", f"La factura {invoice.invoice_number} ya está en tu buzón.", "invoice")
+        audit(request, "issue", "driver_invoice", f"Emitió {invoice.invoice_number}", invoice.id)
+        if email_sent:
+            messages.success(request, "Factura generada, guardada en el buzón y enviada por correo.")
+        else:
+            messages.warning(request, f"Factura guardada en el buzón, pero el correo no salió: {email_error}")
+    except (ValidationError, DatabaseError) as exc:
+        if created and not invoice.pdf_url:
+            invoice.delete()
+        messages.error(request, str(exc))
+    return redirect("panel:monthly_payment_detail", payment_id=payment.id)
+
+
+@driver_portal_required
+def driver_inbox(request):
+    driver = _current_driver(request)
+    message_type = request.GET.get("type", "all")
+    read_filter = request.GET.get("read", "all")
+    query = request.GET.get("q", "").strip()
+    queryset = DriverInboxMessage.objects.filter(driver=driver).select_related("invoice")
+    if message_type in dict(DriverInboxMessage.TYPE_CHOICES):
+        queryset = queryset.filter(message_type=message_type)
+    if read_filter == "unread":
+        queryset = queryset.filter(is_read=False)
+    elif read_filter == "read":
+        queryset = queryset.filter(is_read=True)
+    if query:
+        queryset = queryset.filter(Q(title__icontains=query) | Q(body__icontains=query))
+    page = Paginator(queryset, 10).get_page(request.GET.get("page"))
+    return render(request, "driver/inbox.html", {
+        **_driver_common_context(driver),
+        "page": page,
+        "message_type": message_type,
+        "read_filter": read_filter,
+        "query": query,
+        "types": DriverInboxMessage.TYPE_CHOICES,
+        "unread_count": DriverInboxMessage.objects.filter(driver=driver, is_read=False).count(),
+    })
+
+
+@driver_portal_required
+def driver_inbox_detail(request, message_id):
+    driver = _current_driver(request)
+    inbox_message = get_object_or_404(
+        DriverInboxMessage.objects.select_related("invoice"),
+        pk=message_id,
+        driver=driver,
+    )
+    if not inbox_message.is_read:
+        inbox_message.is_read = True
+        inbox_message.read_at = timezone.now()
+        inbox_message.save(update_fields=["is_read", "read_at"])
+    return render(request, "driver/inbox_detail.html", {
+        **_driver_common_context(driver),
+        "inbox_message": inbox_message,
+    })
+
+
+@admin_required
+def admin_driver_messages(request):
+    form = DriverInboxMessageForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        inbox_message = form.save(commit=False)
+        inbox_message.id = uuid.uuid4()
+        inbox_message.details = {}
+        if form.cleaned_data.get("meeting_at"):
+            inbox_message.details["meeting_at"] = form.cleaned_data["meeting_at"].isoformat()
+        inbox_message.is_read = False
+        inbox_message.created_by = request.user.username
+        inbox_message.created_at = timezone.now()
+        email_sent, email_error = (False, "")
+        if form.cleaned_data.get("send_email"):
+            email_sent, email_error = send_movix_email(
+                inbox_message.driver.email,
+                inbox_message.title,
+                inbox_message.body,
+            )
+            if email_sent:
+                inbox_message.emailed_at = timezone.now()
+        inbox_message.save(force_insert=True)
+        _notify_profile(inbox_message.driver, inbox_message.title, inbox_message.body, inbox_message.message_type)
+        audit(request, "send", "driver_inbox_message", f"Envió mensaje a {inbox_message.driver.full_name}", inbox_message.id)
+        if form.cleaned_data.get("send_email") and not email_sent:
+            messages.warning(request, f"Mensaje guardado y notificado; el correo no salió: {email_error}")
+        else:
+            messages.success(request, "Mensaje enviado al buzón, notificaciones y correo configurado.")
+        return redirect("panel:admin_driver_messages")
+
+    query = request.GET.get("q", "").strip()
+    message_type = request.GET.get("type", "all")
+    queryset = DriverInboxMessage.objects.select_related("driver", "invoice")
+    if query:
+        queryset = queryset.filter(
+            Q(driver__first_name__icontains=query) | Q(driver__last_name__icontains=query)
+            | Q(driver__email__icontains=query) | Q(title__icontains=query)
+        )
+    if message_type in dict(DriverInboxMessage.TYPE_CHOICES):
+        queryset = queryset.filter(message_type=message_type)
+    page = Paginator(queryset, 12).get_page(request.GET.get("page"))
+    return render(request, "payments/messages.html", {
+        "form": form,
+        "page": page,
+        "query": query,
+        "message_type": message_type,
+        "types": DriverInboxMessage.TYPE_CHOICES,
+    })
+
+
+@xframe_options_sameorigin
+def driver_invoice_file(request, invoice_id, action="view"):
+    invoice = get_object_or_404(DriverInvoice.objects.select_related("driver"), pk=invoice_id)
+    is_admin = request.user.is_authenticated and request.user.is_staff
+    is_owner = str(request.session.get("portal_profile_id") or "") == str(invoice.driver_id)
+    if not is_admin and not is_owner:
+        raise PermissionDenied("No puedes consultar esta factura.")
+    return _storage_value_response(
+        invoice.pdf_url,
+        action,
+        f"{invoice.invoice_number}.pdf",
+        (settings.SUPABASE_PRIVATE_BUCKET, settings.SUPABASE_PUBLIC_BUCKET),
+    )
 
 
 @admin_required
@@ -152,29 +1124,35 @@ def contact_request_detail(request, request_id):
     form = ContactResponseForm(request.POST or None, instance=contact)
     if request.method == "POST" and form.is_valid():
         contact = form.save(commit=False)
-        contact.status = ContactRequest.STATUS_RESPONDED
-        contact.responded_by = request.user.get_full_name() or request.user.username
-        contact.responded_at = timezone.now()
+        email_body = (
+            f"Hola {contact.full_name},\n\n{contact.admin_response.strip()}\n\n"
+            "Saludos,\nEquipo MOVIX · Loja, Ecuador"
+        )
+        email_sent, email_error = send_movix_email(
+            contact.email,
+            f"Respuesta MOVIX: {contact.subject}",
+            email_body,
+        )
+        if email_sent:
+            contact.status = ContactRequest.STATUS_RESPONDED
+            contact.responded_by = request.user.get_full_name() or request.user.username
+            contact.responded_at = timezone.now()
         contact.save()
         cache.delete("movix-new-contact-count")
-        audit(request, "respond", "contact_request", f"Respondió la solicitud de {contact.full_name}", contact.id)
-        messages.success(request, "Respuesta guardada. Ya puedes abrir tu correo para enviarla al contacto.")
+        if email_sent:
+            audit(request, "respond", "contact_request", f"Respondió la solicitud de {contact.full_name}", contact.id)
+            messages.success(request, f"Respuesta enviada correctamente a {contact.email}.")
+        else:
+            messages.warning(
+                request,
+                f"La respuesta quedó guardada, pero Gmail no pudo enviarla: {email_error}",
+            )
         return redirect("panel:contact_request_detail", request_id=contact.id)
 
-    response_text = contact.admin_response or (
-        f"Hola {contact.full_name},\n\nGracias por comunicarte con MOVIX. "
-        "Hemos recibido tu solicitud y queremos ayudarte.\n\n"
-    )
-    email_body = response_text + "\n\nSaludos,\nEquipo MOVIX · Loja, Ecuador"
-    mailto_url = (
-        f"mailto:{quote(contact.email, safe='@.')}"
-        f"?subject={quote('Respuesta MOVIX: ' + contact.subject)}"
-        f"&body={quote(email_body)}"
-    )
     return render(
         request,
         "panel/contact_request_detail.html",
-        {"contact": contact, "form": form, "mailto_url": mailto_url},
+        {"contact": contact, "form": form},
     )
 
 
@@ -351,7 +1329,15 @@ def profile_detail(request, kind, profile_id):
     profile = get_object_or_404(_profile_queryset(kind), pk=profile_id)
     reviews = DriverReview.objects.filter(driver=profile).select_related("client")[:8] if kind == "drivers" else DriverReview.objects.filter(client=profile).select_related("driver")[:8]
     ride_count = Ride.objects.filter(driver=profile).count() if kind == "drivers" else Ride.objects.filter(client=profile).count()
-    return render(request, "panel/profile_detail.html", {"kind": kind, "config": config, "profile": profile, "reviews": reviews, "ride_count": ride_count})
+    summary_keys = ("identification", "vehicle") if profile.is_driver else ("identification",)
+    return render(request, "panel/profile_detail.html", {
+        "kind": kind,
+        "config": config,
+        "profile": profile,
+        "reviews": reviews,
+        "ride_count": ride_count,
+        "summary_documents": _profile_document_items(profile, summary_keys),
+    })
 
 
 @admin_required
@@ -500,17 +1486,21 @@ def verification_list(request):
         approved=Count("id", filter=_verification_q("approved")),
         rejected=Count("id", filter=_verification_q("rejected")),
     )
-    return render(request, "panel/verification_list.html", {"profiles": queryset[:100], "counts": counts, "query": query, "status": status, "kind_filter": kind})
+    page = Paginator(queryset, 15).get_page(request.GET.get("page"))
+    return render(request, "panel/verification_list.html", {
+        "profiles": page.object_list,
+        "page": page,
+        "counts": counts,
+        "query": query,
+        "status": status,
+        "kind_filter": kind,
+    })
 
 
 @admin_required
 def verification_detail(request, profile_id):
     profile = get_object_or_404(Profile, pk=profile_id)
-    documents = []
-    for key, (field_name, label) in DOCUMENT_FIELDS.items():
-        if not profile.is_driver and key in {"vehicle", "license", "registration", "insurance"}:
-            continue
-        documents.append({"key": key, "label": label, "value": getattr(profile, field_name, "")})
+    documents = _profile_document_items(profile)
     return render(request, "panel/verification_detail.html", {"profile": profile, "documents": documents, "kind": "drivers" if profile.is_driver else "users"})
 
 
@@ -565,30 +1555,133 @@ def verification_update(request, profile_id, decision):
     return redirect("panel:verification_list")
 
 
-@admin_required
+@xframe_options_sameorigin
 def document_access(request, profile_id, document_key, action="view"):
     profile = get_object_or_404(Profile, pk=profile_id)
+    is_admin = request.user.is_authenticated and request.user.is_staff
+    is_owner = str(request.session.get("portal_profile_id") or "") == str(profile.id)
+    if not is_admin and not is_owner:
+        raise PermissionDenied("No puedes consultar documentos de otro perfil.")
     if document_key not in DOCUMENT_FIELDS:
         raise Http404
     field_name, label = DOCUMENT_FIELDS[document_key]
     value = getattr(profile, field_name, "")
+    if document_key == "profile" and not value:
+        value = profile.avatar_url
     if not value or not is_safe_media_url(value):
         messages.error(request, "El archivo no existe o su origen no está permitido.")
         return redirect("panel:verification_detail", profile_id=profile.id)
-    url = resolve_media_url(value, expires=300)
+    preferred_buckets = (
+        (settings.SUPABASE_PUBLIC_BUCKET, settings.SUPABASE_PRIVATE_BUCKET)
+        if document_key in PUBLIC_DOCUMENT_KEYS
+        else (settings.SUPABASE_PRIVATE_BUCKET, settings.SUPABASE_PUBLIC_BUCKET)
+    )
+    url = resolve_media_url(value, expires=300, preferred_buckets=preferred_buckets)
     if not url:
-        messages.error(request, "No se pudo generar el enlace temporal del archivo.")
+        if action == "view":
+            svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="720" height="420" viewBox="0 0 720 420">
+            <rect width="720" height="420" rx="22" fill="#edf8ff"/><g fill="none" stroke="#2d6bea" stroke-width="10" stroke-linecap="round"><rect x="290" y="105" width="140" height="120" rx="18"/><path d="m305 207 42-45 35 32 24-25 20 19"/><path d="M300 292h120"/></g><text x="360" y="335" text-anchor="middle" font-family="Arial,sans-serif" font-size="23" font-weight="700" fill="#183153">No se encontró {escape(label)}</text><text x="360" y="370" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" fill="#6c7f9c">Revisa la ruta y el bucket guardados en Supabase</text></svg>"""
+            placeholder = HttpResponse(svg, content_type="image/svg+xml")
+            placeholder["X-Movix-Media-Status"] = "storage-object-not-found"
+            placeholder["Cache-Control"] = "no-store"
+            return placeholder
+        messages.error(request, "El campo existe, pero no coincide con ningún objeto accesible de Supabase Storage.")
         return redirect("panel:verification_detail", profile_id=profile.id)
-    if action == "view":
-        return redirect(url)
-    response = requests.get(url, stream=True, timeout=40)
-    if response.status_code != 200:
-        messages.error(request, "No se pudo descargar el archivo.")
+    # El navegador no se redirige directamente a Supabase. Django descarga el
+    # objeto con la URL pública/firmada recién generada y lo sirve desde el mismo
+    # dominio del panel. Esto evita enlaces firmados vencidos, bloqueos del
+    # navegador y diferencias entre buckets públicos y privados.
+    try:
+        upstream = requests.get(url, stream=True, timeout=(8, 40), allow_redirects=True)
+    except requests.RequestException:
+        upstream = None
+
+    if upstream is None or upstream.status_code != 200:
+        if upstream is not None:
+            upstream.close()
+        if action == "view":
+            svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="720" height="420" viewBox="0 0 720 420">
+            <rect width="720" height="420" rx="22" fill="#edf8ff"/><g fill="none" stroke="#ef4444" stroke-width="10" stroke-linecap="round"><rect x="290" y="105" width="140" height="120" rx="18"/><path d="m305 207 42-45 35 32 24-25 20 19"/><path d="M300 292h120"/></g><text x="360" y="335" text-anchor="middle" font-family="Arial,sans-serif" font-size="23" font-weight="700" fill="#183153">Supabase no entregó {escape(label)}</text><text x="360" y="370" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" fill="#6c7f9c">Comprueba SUPABASE_SERVICE_ROLE_KEY y la ruta del objeto</text></svg>"""
+            placeholder = HttpResponse(svg, content_type="image/svg+xml")
+            placeholder["X-Movix-Media-Status"] = "storage-download-failed"
+            placeholder["Cache-Control"] = "no-store"
+            return placeholder
+        messages.error(request, "Supabase encontró la ruta, pero no permitió descargar el archivo.")
         return redirect("panel:verification_detail", profile_id=profile.id)
-    filename = url.split("?")[0].rstrip("/").split("/")[-1] or f"{label}.bin"
-    download = StreamingHttpResponse(response.iter_content(chunk_size=8192), content_type=response.headers.get("Content-Type", "application/octet-stream"))
-    download["Content-Disposition"] = f'attachment; filename="{filename}"'
-    return download
+
+    raw_name = str(value).split("?", 1)[0].rstrip("/").split("/")[-1]
+    filename = raw_name or url.split("?", 1)[0].rstrip("/").split("/")[-1] or f"{label}.bin"
+    content_type = (upstream.headers.get("Content-Type") or "application/octet-stream").split(";", 1)[0].strip()
+    if content_type == "application/octet-stream":
+        content_type = mimetypes.guess_type(filename)[0] or content_type
+    # Una respuesta JSON en este punto corresponde a un error de Storage, no a
+    # una imagen válida. No se envía al elemento <img> del navegador.
+    if content_type in {"application/json", "text/json"}:
+        upstream.close()
+        if action == "view":
+            placeholder = HttpResponse(
+                '<svg xmlns="http://www.w3.org/2000/svg" width="720" height="420"><rect width="100%" height="100%" rx="22" fill="#edf8ff"/><text x="50%" y="48%" text-anchor="middle" font-family="Arial" font-size="24" font-weight="700" fill="#183153">El archivo no pudo abrirse</text><text x="50%" y="57%" text-anchor="middle" font-family="Arial" font-size="16" fill="#6c7f9c">Supabase devolvió una respuesta de permisos</text></svg>',
+                content_type="image/svg+xml",
+            )
+            placeholder["X-Movix-Media-Status"] = "storage-invalid-response"
+            placeholder["Cache-Control"] = "no-store"
+            return placeholder
+        messages.error(request, "Supabase devolvió una respuesta de permisos en lugar del archivo.")
+        return redirect("panel:verification_detail", profile_id=profile.id)
+
+    def stream_file():
+        try:
+            yield from upstream.iter_content(chunk_size=64 * 1024)
+        finally:
+            upstream.close()
+
+    response = StreamingHttpResponse(stream_file(), content_type=content_type)
+    disposition = "attachment" if action == "download" else "inline"
+    response["Content-Disposition"] = f'{disposition}; filename="{filename.replace(chr(34), "")}"'
+    response["Cache-Control"] = "private, max-age=60" if action == "view" else "no-store"
+    response["X-Movix-Media-Status"] = "proxied"
+    if upstream.headers.get("Content-Length"):
+        response["Content-Length"] = upstream.headers["Content-Length"]
+    return response
+
+
+@xframe_options_sameorigin
+def monthly_payment_receipt(request, payment_id, action="view"):
+    payment = get_object_or_404(DriverMonthlyPayment.objects.select_related("driver"), pk=payment_id)
+    is_admin = request.user.is_authenticated and request.user.is_staff
+    is_owner = str(request.session.get("portal_profile_id") or "") == str(payment.driver_id)
+    if not is_admin and not is_owner:
+        raise PermissionDenied("No puedes consultar este comprobante.")
+    if action not in {"view", "download"} or not payment.receipt_url or not is_safe_media_url(payment.receipt_url):
+        raise Http404
+    url = resolve_media_url(
+        payment.receipt_url,
+        expires=300,
+        preferred_buckets=(settings.SUPABASE_PRIVATE_BUCKET, settings.SUPABASE_PUBLIC_BUCKET),
+    )
+    if not url:
+        raise Http404("No se encontró el comprobante en Supabase Storage.")
+    try:
+        upstream = requests.get(url, stream=True, timeout=(8, 40), allow_redirects=True)
+        upstream.raise_for_status()
+    except requests.RequestException as exc:
+        raise Http404("Supabase no pudo entregar el comprobante.") from exc
+    filename = str(payment.receipt_url).split("?", 1)[0].rstrip("/").split("/")[-1] or "comprobante"
+    content_type = (upstream.headers.get("Content-Type") or mimetypes.guess_type(filename)[0] or "application/octet-stream").split(";", 1)[0]
+
+    def stream_file():
+        try:
+            yield from upstream.iter_content(chunk_size=64 * 1024)
+        finally:
+            upstream.close()
+
+    response = StreamingHttpResponse(stream_file(), content_type=content_type)
+    disposition = "attachment" if action == "download" else "inline"
+    response["Content-Disposition"] = f'{disposition}; filename="{filename.replace(chr(34), "")}"'
+    response["Cache-Control"] = "private, max-age=60" if action == "view" else "no-store"
+    if upstream.headers.get("Content-Length"):
+        response["Content-Length"] = upstream.headers["Content-Length"]
+    return response
 
 
 @admin_required
@@ -679,6 +1772,7 @@ def admin_profile_view(request):
     admin_profile, _ = AdminProfile.objects.get_or_create(user=request.user)
     profile_form = AdminProfileForm(request.POST or None, request.FILES or None, user=request.user, prefix="profile")
     password_form = PasswordChangeForm(request.user, request.POST or None, prefix="password")
+    editing = request.GET.get("editar") == "1" or request.POST.get("action") == "profile"
     if request.method == "POST":
         action = request.POST.get("action")
         if action == "profile" and profile_form.is_valid():
@@ -710,7 +1804,17 @@ def admin_profile_view(request):
         "drivers": _profile_queryset("drivers").count(),
         "pending": Profile.objects.filter(_verification_q("pending")).count(),
     }
-    return render(request, "panel/admin_profile.html", {"admin_profile": admin_profile, "profile_form": profile_form, "password_form": password_form, "stats": stats})
+    return render(
+        request,
+        "panel/admin_profile.html",
+        {
+            "admin_profile": admin_profile,
+            "profile_form": profile_form,
+            "password_form": password_form,
+            "stats": stats,
+            "editing": editing,
+        },
+    )
 
 
 @admin_required
@@ -763,6 +1867,9 @@ def global_search(request):
         ("Inicio", "panel:dashboard"), ("Usuarios", "panel:profile_list", "users"),
         ("Transportistas", "panel:profile_list", "drivers"), ("Notificaciones", "panel:notifications"),
         ("Publicidad", "panel:advertisements"), ("Verificar documentos", "panel:verification_list"),
+        ("Mensualidades", "panel:monthly_payment_list"),
+        ("Bancos y cuentas", "panel:payment_bank_accounts"),
+        ("Mensajes transportistas", "panel:admin_driver_messages"),
         ("Perfil", "panel:admin_profile"), ("Configuración", "panel:settings"),
     ]
     results = [item for item in modules if len(query) >= 2 and query in item[0].lower()]

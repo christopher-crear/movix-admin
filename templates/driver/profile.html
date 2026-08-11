@@ -1,0 +1,45 @@
+{% extends 'base.html' %}{% load static movix_tags %}
+{% block title %}Mi perfil{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{% static 'css/driver_panel.css' %}?v=20260810-91">{% endblock %}
+{% block content %}
+<header class="driver-page-heading">
+    <div><span>CUENTA PERSONAL</span><h1>Mi perfil</h1><p>Datos sincronizados con tu registro en Supabase.</p></div>
+    {% if not editing %}<a class="driver-outline-button" href="?editar=1"><svg><use href="#dp-edit"/></svg> Editar información</a>{% else %}<a class="driver-outline-button" href="{% url 'panel:driver_profile' %}">Cancelar</a>{% endif %}
+</header>
+<section class="driver-profile-hero">
+    <div class="driver-profile-person">{% if driver_avatar_url %}<img src="{{ driver_avatar_url }}" alt="Foto de {{ driver.full_name }}">{% else %}<span>{{ driver.initials }}</span>{% endif %}<div><h2>{{ driver.full_name }}</h2><p>★ {{ review_stats.average|default:driver.rating|floatformat:1 }} · {{ ride_count }} viajes</p><b class="{% if driver.effective_verification_status == 'approved' %}verified{% endif %}">{% if driver.effective_verification_status == 'approved' %}✓ Transportista verificado{% else %}Verificación {{ driver.verification_label|lower }}{% endif %}</b></div></div>
+    <div class="driver-vehicle-summary"><svg><use href="#dp-truck"/></svg><div><strong>{{ driver.vehicle_type_label }}</strong><span>{{ driver.vehicle_plate|default:'Sin placa' }} · Capacidad: {{ driver.load_capacity|default:0|floatformat:0 }} kg</span></div></div>
+    <div class="driver-profile-numbers"><span><strong>{{ ride_count }}</strong><small>Viajes</small></span><span><strong>{{ driver.experience_years|default:0 }}</strong><small>Años exp.</small></span><span><strong>{{ review_stats.average|default:driver.rating|floatformat:1 }}</strong><small>Rating</small></span></div>
+</section>
+
+{% if editing %}
+<section class="driver-card driver-profile-form-card">
+    <h2>Editar información y documentos</h2><p>Selecciona uno de los tres vehículos admitidos. Los documentos modificados volverán al estado pendiente.</p>
+    <form method="post" enctype="multipart/form-data" class="driver-form-grid">{% csrf_token %}<input type="hidden" name="action" value="profile">{{ profile_form.non_field_errors }}
+        {% for field in profile_form %}<label class="driver-field {% if 'file' in field.name %}file-field{% endif %}"><span>{{ field.label }}</span>{{ field }}{{ field.errors }}</label>{% endfor %}
+        <div class="driver-form-actions"><a href="{% url 'panel:driver_profile' %}" class="driver-outline-button">Cancelar</a><button class="driver-primary-button">Guardar cambios</button></div>
+    </form>
+</section>
+{% else %}
+<div class="driver-profile-grid">
+    <section class="driver-card">
+        <h2>Documentos</h2><p class="driver-card-copy">Archivos sincronizados con Supabase. Toca un documento para visualizarlo.</p>
+        <div class="driver-doc-list">
+            {% for document in documents %}
+                {% if document.value %}
+                <button type="button" data-document-preview data-title="{{ document.label }}" data-file-name="{{ document.value|file_name }}" data-preview-url="{% url 'panel:document_access' driver.id document.key 'view' %}" data-download-url="{% url 'panel:document_access' driver.id document.key 'download' %}" data-preview-pdf="{{ document.value|is_pdf|yesno:'true,false' }}">
+                    <svg><use href="{% if document.key == 'profile' or document.key == 'vehicle' or document.key == 'identification' %}#i-camera{% else %}#dp-file{% endif %}"/></svg>
+                    <span>{{ document.label }}<small>{{ document.value|file_name }}</small></span>
+                    <b class="status-{{ document.status }}">{% if document.status == 'approved' %}✓ {% endif %}{{ document.status_label }}</b><i>Ver</i>
+                </button>
+                {% else %}
+                <span class="missing"><svg><use href="#dp-file"/></svg><span>{{ document.label }}<small>No se ha cargado ningún archivo</small></span><b>Sin archivo</b></span>
+                {% endif %}
+            {% endfor %}
+        </div>
+    </section>
+    <section class="driver-card"><h2>Información personal</h2><dl class="driver-detail-list"><div><dt>Correo</dt><dd>{{ driver.email|default:'—' }}</dd></div><div><dt>Teléfono</dt><dd>{{ driver.phone|default:'—' }}</dd></div><div><dt>Cédula</dt><dd>{{ driver.identity }}</dd></div><div><dt>Licencia</dt><dd>{{ driver.license_number|default:'—' }}</dd></div><div><dt>Disponibilidad</dt><dd>{% if driver.is_available %}Disponible{% else %}No disponible{% endif %}</dd></div></dl></section>
+</div>
+{% endif %}
+<section class="driver-card driver-password-card"><h2>Cambiar contraseña</h2><p>Esta acción actualiza la contraseña de tu cuenta en Supabase Auth.</p><form method="post" class="driver-password-form">{% csrf_token %}<input type="hidden" name="action" value="password">{{ password_form.non_field_errors }}{% for field in password_form %}<label class="driver-field"><span>{{ field.label }}</span>{{ field }}{{ field.errors }}</label>{% endfor %}<button class="driver-primary-button">Actualizar contraseña</button></form></section>
+{% endblock %}

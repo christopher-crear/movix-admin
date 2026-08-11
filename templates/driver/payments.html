@@ -1,0 +1,68 @@
+{% extends 'base.html' %}{% load static movix_tags %}
+{% block title %}Mi mensualidad{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{% static 'css/driver_panel.css' %}?v=20260810-140">{% endblock %}
+{% block content %}
+<header class="driver-page-heading payment-page-heading">
+    <div><span>PAGOS MOVIX</span><h1>Mi mensualidad</h1><p>Consulta las cuentas oficiales, registra tu pago y revisa el estado de cada comprobante.</p></div>
+    <a class="driver-outline-button" href="{% url 'panel:driver_inbox' %}"><svg><use href="#i-mail"/></svg> Abrir buzón{% if driver_unread_count %}<b class="nav-count">{{ driver_unread_count }}</b>{% endif %}</a>
+</header>
+
+<section class="driver-card bank-directory">
+    <div class="section-heading-row"><div><span class="eyebrow">CUENTAS OFICIALES</span><h2>Elige el banco para pagar</h2><p>Pulsa una tarjeta para consultar titular, número de cuenta y código QR.</p></div></div>
+    <div class="driver-bank-grid payment-bank-grid-v13">
+        {% for row in bank_cards %}
+        <button class="driver-bank-card" type="button" data-bank-dialog-open="bankPaymentDialog{{ row.account.id }}">
+            <span class="driver-bank-card-content">
+                <span class="bank-logo-shell"><img src="{% if row.logo_url %}{{ row.logo_url }}{% else %}{% static row.account.default_logo %}{% endif %}" alt="{{ row.account.name }}"></span>
+                <span><small>Cuenta habilitada</small><strong>{{ row.account.name }}</strong><em>Ver datos de pago</em></span>
+                <svg><use href="#i-eye"/></svg>
+            </span>
+        </button>
+
+        <dialog class="driver-bank-dialog" id="bankPaymentDialog{{ row.account.id }}">
+            <header><div><span class="eyebrow">DATOS OFICIALES DE PAGO</span><h2>{{ row.account.name }}</h2></div><button type="button" aria-label="Cerrar" data-bank-dialog-close><svg><use href="#i-x"/></svg></button></header>
+            <div class="driver-bank-dialog-body">
+                <section class="bank-dialog-account">
+                    <span class="bank-dialog-logo"><img src="{% if row.logo_url %}{{ row.logo_url }}{% else %}{% static row.account.default_logo %}{% endif %}" alt="{{ row.account.name }}"></span>
+                    <span class="pill pill-green">Cuenta habilitada</span>
+                    <dl>
+                        <div><dt>Titular</dt><dd>{{ row.account.account_holder }}</dd></div>
+                        <div><dt>Número de cuenta</dt><dd>{{ row.account.account_number }}</dd></div>
+                        <div><dt>Tipo de cuenta</dt><dd>{{ row.account.account_type_label }}</dd></div>
+                        {% if row.account.identification_number %}<div><dt>Cédula / RUC</dt><dd>{{ row.account.identification_number }}</dd></div>{% endif %}
+                    </dl>
+                    {% if row.account.instructions %}<div class="bank-dialog-instructions"><svg><use href="#i-inbox"/></svg><span><strong>Indicaciones</strong><p>{{ row.account.instructions }}</p></span></div>{% endif %}
+                </section>
+                <aside class="bank-dialog-qr">
+                    {% if row.account.qr_url %}<span>Escanea para pagar</span><div><img src="{% url 'panel:payment_bank_asset' row.account.id 'qr' 'view' %}" alt="QR de {{ row.account.name }}"></div><small>Verifica los datos antes de confirmar.</small>{% else %}<div class="bank-dialog-no-qr"><svg><use href="#i-inbox"/></svg><strong>Sin código QR</strong><small>Usa los datos de la cuenta para realizar el pago.</small></div>{% endif %}
+                </aside>
+            </div>
+            <footer><button type="button" class="driver-outline-button" data-bank-dialog-close>Cerrar</button><button type="button" class="driver-primary-button" data-use-payment-bank="{{ row.account.code }}"><svg><use href="#i-check"/></svg>Usar esta cuenta</button></footer>
+        </dialog>
+        {% empty %}<div class="driver-empty"><svg><use href="#i-inbox"/></svg><b>No hay cuentas publicadas</b><span>El administrador debe registrar los datos bancarios.</span></div>{% endfor %}
+    </div>
+</section>
+
+<div class="driver-payment-grid redesigned-payment-grid">
+    <section class="driver-card driver-payment-form-card">
+        <span class="eyebrow">NUEVO COMPROBANTE</span><h2>Registrar mensualidad</h2>
+        {% if current_payment %}<div class="payment-current-status status-{{ current_payment.status }}"><strong>{{ current_payment.status_label }}</strong><span>Ya existe un registro para {{ current_payment.period|date:'F Y' }}.</span>{% if current_payment.admin_notes %}<small>{{ current_payment.admin_notes }}</small>{% endif %}</div>{% else %}
+        <form method="post" enctype="multipart/form-data" class="driver-form-grid payment-form-compact" id="driverPaymentForm">{% csrf_token %}{{ form.non_field_errors }}
+            <label class="driver-field payment-period-field"><span>{{ form.period.label }}</span>{{ form.period }}{{ form.period.errors }}</label>
+            <label class="driver-field"><span>{{ form.amount.label }}</span>{{ form.amount }}{{ form.amount.errors }}</label>
+            <label class="driver-field"><span>{{ form.bank.label }}</span><select class="form-control" name="bank" id="id_bank" required><option value="" {% if not form.bank.value %}selected{% endif %} disabled>Selecciona un banco</option>{% for row in bank_cards %}<option value="{{ row.account.code }}" {% if form.bank.value == row.account.code %}selected{% endif %}>{{ row.account.name }}</option>{% endfor %}<option value="physical" {% if form.bank.value == 'physical' %}selected{% endif %}>Pago físico</option></select>{{ form.bank.errors }}</label>
+            <label class="driver-field"><span>{{ form.payment_method.label }}</span><select class="form-control" name="payment_method" id="id_payment_method" required><option value="" {% if not form.payment_method.value %}selected{% endif %} disabled>Selecciona el tipo de pago</option><option value="transfer" {% if form.payment_method.value == 'transfer' %}selected{% endif %}>Transferencia bancaria</option><option value="deposit" {% if form.payment_method.value == 'deposit' %}selected{% endif %}>Depósito bancario</option><option value="cash" {% if form.payment_method.value == 'cash' %}selected{% endif %}>Pago físico</option></select>{{ form.payment_method.errors }}</label>
+            <label class="driver-field file-field payment-receipt-field" data-local-upload data-payment-receipt-field><span>{{ form.receipt.label }}</span><span class="local-file-preview" aria-hidden="true"><img alt="Previsualización del comprobante"><span class="local-pdf-preview"><iframe class="local-pdf-frame" title="Previsualización del PDF" tabindex="-1"></iframe><b>PDF</b></span></span>{{ form.receipt }}<small data-file-name>Selecciona una imagen o PDF</small>{{ form.receipt.errors }}</label>
+            <div class="payment-method-help" data-payment-method-help><svg><use href="#i-inbox"/></svg><span>Selecciona una transferencia o depósito y adjunta su comprobante.</span></div>
+            <div class="driver-form-actions"><button class="driver-primary-button" type="submit"><svg><use href="#i-upload"/></svg> Enviar para revisión</button></div>
+        </form>{% endif %}
+        <p class="payment-note">También puedes pagar físicamente. En ese caso el administrador registrará el pago y podrá emitir tu factura.</p>
+    </section>
+    <section class="driver-card payment-history-card">
+        <div class="section-heading-row"><div><span class="eyebrow">SEGUIMIENTO</span><h2>Historial de pagos</h2></div></div>
+        <nav class="compact-filter-tabs"><a class="{% if payment_status == 'all' %}active{% endif %}" href="?status=all">Todos</a><a class="{% if payment_status == 'pending' %}active{% endif %}" href="?status=pending">Pendientes</a><a class="{% if payment_status == 'approved' %}active{% endif %}" href="?status=approved">Aprobados</a><a class="{% if payment_status == 'rejected' %}active{% endif %}" href="?status=rejected">Rechazados</a></nav>
+        <div class="driver-payment-history">{% for payment in page %}<article><span class="payment-icon status-{{ payment.status }}"><svg><use href="#i-inbox"/></svg></span><div><strong>{{ payment.period|date:'F Y' }}</strong><small>{{ payment.bank_label }} · {{ payment.method_label }}</small>{% if payment.amount %}<p>USD {{ payment.amount|floatformat:2 }}</p>{% endif %}{% if payment.admin_notes %}<p>{{ payment.admin_notes }}</p>{% endif %}</div><b class="status-{{ payment.status }}">{{ payment.status_label }}</b>{% if payment.receipt_url %}<button type="button" data-document-preview data-title="Comprobante de {{ payment.period|date:'F Y' }}" data-file-name="{{ payment.receipt_url|file_name }}" data-preview-url="{% url 'panel:monthly_payment_receipt' payment.id 'view' %}" data-download-url="{% url 'panel:monthly_payment_receipt' payment.id 'download' %}" data-preview-pdf="{{ payment.receipt_url|is_pdf|yesno:'true,false' }}">Ver comprobante</button>{% endif %}</article>{% empty %}<div class="driver-empty"><svg><use href="#i-inbox"/></svg><b>Sin pagos en este filtro</b><span>Tus comprobantes aparecerán aquí.</span></div>{% endfor %}</div>
+        {% if page.paginator.num_pages > 1 %}<nav class="driver-pagination">{% if page.has_previous %}<a href="?status={{ payment_status }}&page={{ page.previous_page_number }}">Anterior</a>{% endif %}<span>Página {{ page.number }} de {{ page.paginator.num_pages }}</span>{% if page.has_next %}<a href="?status={{ payment_status }}&page={{ page.next_page_number }}">Siguiente</a>{% endif %}</nav>{% endif %}
+    </section>
+</div>
+{% endblock %}

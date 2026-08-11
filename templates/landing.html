@@ -7,7 +7,7 @@
     <meta name="description" content="MOVIX conecta personas y transportistas de carga liviana en Loja, Ecuador. Solicita camionetas y camiones de forma rápida, segura y confiable.">
     <meta name="theme-color" content="#071d3d">
     <title>MOVIX · Transporte de carga en Loja</title>
-    <link rel="icon" href="{% static 'img/logo-mark.svg' %}" type="image/svg+xml">
+    <link rel="icon" href="{% static 'img/ICONO_APP.png' %}" type="image/svg+xml">
     <link rel="stylesheet" href="{% static 'css/landing.css' %}">
 </head>
 <body>
@@ -36,7 +36,7 @@
 <header class="landing-header" data-header>
     <div class="landing-container nav-wrap">
         <a class="landing-brand" href="#inicio" aria-label="MOVIX, ir al inicio">
-            <img src="{% static 'img/logo-mark.svg' %}" alt="Logo MOVIX">
+            <img src="{% static 'img/ICONO_APP.png' %}" alt="Logo MOVIX">
             <span><strong>MOVIX</strong><small>Tu carga, nuestro camino</small></span>
         </a>
         <button class="mobile-nav-button" type="button" data-nav-toggle aria-label="Abrir menú" aria-expanded="false">
@@ -83,7 +83,7 @@
                     <div class="phone-speaker"></div>
                     <div class="phone-screen">
                         <div class="phone-status"><span>9:41</span><span>● ◔</span></div>
-                        <div class="phone-appbar"><img src="{% static 'img/logo-mark.svg' %}" alt=""><div><b>Hola, María</b><small>¿Qué necesitas mover?</small></div><i>•••</i></div>
+                        <div class="phone-appbar"><img src="{% static 'img/ICONO_APP.png' %}" alt=""><div><b>Hola, María</b><small>¿Qué necesitas mover?</small></div><i>•••</i></div>
                         <div class="mini-map">
                             <span class="map-road road-a"></span><span class="map-road road-b"></span><span class="map-road road-c"></span>
                             <div class="map-point point-a"><i></i></div><div class="map-point point-b"><i></i></div>
@@ -206,7 +206,7 @@
 
     <section class="driver-section" id="conductores">
         <div class="landing-container driver-grid">
-            <div class="driver-copy reveal"><span>CRECE CON NOSOTROS</span><h2>Genera ingresos transportando con MOVIX</h2><p>Si tienes una camioneta o camión y quieres trabajar de manera independiente en Loja, MOVIX puede conectarte con personas que necesitan tus servicios.</p><ul><li>Administra tu disponibilidad</li><li>Recibe solicitudes cercanas</li><li>Construye tu reputación</li><li>Forma parte de una red local</li></ul><a class="landing-btn landing-btn-primary" href="#contacto" data-contact-type="driver">Quiero ser transportista →</a></div>
+            <div class="driver-copy reveal"><span>CRECE CON NOSOTROS</span><h2>Genera ingresos transportando con MOVIX</h2><p>Si tienes una camioneta o camión y quieres trabajar de manera independiente en Loja, MOVIX puede conectarte con personas que necesitan tus servicios.</p><ul><li>Administra tu disponibilidad</li><li>Recibe solicitudes cercanas</li><li>Construye tu reputación</li><li>Forma parte de una red local</li></ul><a class="landing-btn landing-btn-primary" href="#contacto" data-contact-type="driver">Quiero ser transportista →</a> <a class="landing-btn landing-btn-ghost" href="{% url 'login' %}">Ingresar al portal →</a></div>
             <div class="driver-visual reveal"><div class="truck-window"><img src="https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=1200&q=84" alt="Profesional de transporte y logística" loading="lazy"><div class="city-lines"></div><span class="truck-figure"><svg><use href="#lp-truck"/></svg></span></div><div class="earning-card"><small>Oportunidades locales</small><strong>Trabaja a tu ritmo</strong><span>Loja · Ecuador</span></div></div>
         </div>
     </section>
@@ -286,7 +286,7 @@
 </main>
 
 <footer class="landing-footer">
-    <div class="landing-container footer-grid"><div><a class="landing-brand" href="#inicio"><img src="{% static 'img/logo-mark.svg' %}" alt=""><span><strong>MOVIX</strong><small>Tu carga, nuestro camino</small></span></a><p>Conectando a Loja con una nueva forma de transportar carga liviana.</p><div class="footer-social"><a href="{{ facebook_url }}" target="_blank" rel="noopener" aria-label="Facebook de MOVIX"><svg><use href="#lp-facebook"/></svg></a><a href="https://wa.me/{{ whatsapp_number }}?text=Hola%20MOVIX" target="_blank" rel="noopener" aria-label="WhatsApp de MOVIX"><svg><use href="#lp-whatsapp"/></svg></a><a href="mailto:{{ support_email }}" aria-label="Correo de MOVIX"><svg><use href="#lp-mail"/></svg></a></div></div><div><b>Explora</b><a href="#servicios">Servicios</a><a href="#como-funciona">Cómo funciona</a><a href="#vehiculos">Vehículos</a><a href="#preguntas">Preguntas</a></div><div><b>Comunidad</b><a href="#conductores">Ser transportista</a><a href="{% url 'panel:demo' %}">Probar demo</a><a href="#contacto">Contacto</a></div><div><b>Contacto</b><a href="mailto:{{ support_email }}">{{ support_email }}</a><a href="https://wa.me/{{ whatsapp_number }}" target="_blank" rel="noopener">{{ whatsapp_display }}</a><span>Loja, Ecuador</span></div></div>
+    <div class="landing-container footer-grid"><div><a class="landing-brand" href="#inicio"><img src="{% static 'img/logo-mark.svg' %}" alt=""><span><strong>MOVIX</strong><small>Tu carga, nuestro camino</small></span></a><p>Conectando a Loja con una nueva forma de transportar carga liviana.</p><div class="footer-social"><a href="{{ facebook_url }}" target="_blank" rel="noopener" aria-label="Facebook de MOVIX"><svg><use href="#lp-facebook"/></svg></a><a href="https://wa.me/{{ whatsapp_number }}?text=Hola%20MOVIX" target="_blank" rel="noopener" aria-label="WhatsApp de MOVIX"><svg><use href="#lp-whatsapp"/></svg></a><a href="mailto:{{ support_email }}" aria-label="Correo de MOVIX"><svg><use href="#lp-mail"/></svg></a></div></div><div><b>Explora</b><a href="#servicios">Servicios</a><a href="#como-funciona">Cómo funciona</a><a href="#vehiculos">Vehículos</a><a href="#preguntas">Preguntas</a></div><div><b>Comunidad</b><a href="#conductores">Ser transportista</a><a href="{% url 'login' %}">Portal transportista</a><a href="{% url 'panel:demo' %}">Probar demo</a><a href="#contacto">Contacto</a></div><div><b>Contacto</b><a href="mailto:{{ support_email }}">{{ support_email }}</a><a href="https://wa.me/{{ whatsapp_number }}" target="_blank" rel="noopener">{{ whatsapp_display }}</a><span>Loja, Ecuador</span></div></div>
     <div class="landing-container footer-bottom"><span>© {% now 'Y' %} MOVIX. Todos los derechos reservados.</span><span>Diseñado para mover Loja</span></div>
 </footer>
 <script src="{% static 'js/landing.js' %}"></script>

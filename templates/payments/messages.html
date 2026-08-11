@@ -1,0 +1,47 @@
+{% extends 'base.html' %}
+{% block title %}Mensajes a transportistas{% endblock %}
+{% block content %}
+<main class="messages-page message-center-v12">
+    <header class="page-heading">
+        <div><span class="eyebrow">COMUNICACIONES</span><h1>Mensajes a transportistas</h1><p>Envía reuniones, avisos y reportes al buzón, correo y notificaciones del transportista.</p></div>
+        <a class="btn btn-secondary" href="{% url 'panel:monthly_payment_list' %}"><svg><use href="#i-inbox"/></svg>Ver mensualidades</a>
+    </header>
+
+    <div class="message-admin-layout">
+        <section class="card message-compose-card">
+            <header class="message-compose-heading"><span><svg><use href="#i-mail"/></svg></span><div><h2>Redactar mensaje</h2><p>El transportista lo recibirá inmediatamente en su buzón.</p></div></header>
+            <form method="post" class="message-compose-form">
+                {% csrf_token %}{{ form.non_field_errors }}
+                <label class="form-field field-full"><span>{{ form.driver.label }} *</span>{{ form.driver }}{{ form.driver.errors }}</label>
+                <div class="message-field-pair">
+                    <label class="form-field"><span>{{ form.message_type.label }} *</span>{{ form.message_type }}{{ form.message_type.errors }}</label>
+                    <label class="form-field"><span>{{ form.meeting_at.label }}</span>{{ form.meeting_at }}{{ form.meeting_at.errors }}</label>
+                </div>
+                <label class="form-field field-full"><span>{{ form.title.label }} *</span>{{ form.title }}{{ form.title.errors }}</label>
+                <label class="form-field field-full"><span>{{ form.body.label }} *</span>{{ form.body }}<small>Incluye la información necesaria y una acción clara.</small>{{ form.body.errors }}</label>
+                <label class="mail-delivery-option">{{ form.send_email }}<span><strong>Enviar también por correo</strong><small>Además del buzón y la notificación de MOVIX.</small></span></label>{{ form.send_email.errors }}
+                <button class="btn btn-primary btn-block message-submit" type="submit"><svg><use href="#i-mail"/></svg>Enviar mensaje</button>
+            </form>
+        </section>
+
+        <section class="card message-history-panel">
+            <header class="message-history-heading"><div><span class="eyebrow">HISTORIAL</span><h2>Mensajes enviados</h2><p>{{ page.paginator.count }} mensaje{{ page.paginator.count|pluralize }} encontrado{{ page.paginator.count|pluralize }}</p></div></header>
+            <form class="message-history-toolbar" method="get" data-auto-search data-min-length="2">
+                <label class="search-input-shell"><svg><use href="#i-search"/></svg><input name="q" value="{{ query }}" placeholder="Buscar transportista, correo o título..."></label>
+                <select class="form-control" name="type" onchange="this.form.submit()"><option value="all">Todos los tipos</option>{% for value,label in types %}<option value="{{ value }}" {% if message_type == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+            </form>
+            <div class="message-history-grid">
+            {% for item in page %}
+                <article class="message-history-card">
+                    <header><span class="pill pill-blue">{{ item.type_label }}</span><time>{{ item.created_at|date:'d M Y · H:i' }}</time></header>
+                    <h3>{{ item.title }}</h3><p>{{ item.body|truncatechars:170 }}</p>
+                    {% if item.details.meeting_at %}<div class="message-meeting"><svg><use href="#i-clock"/></svg><span>Reunión programada</span></div>{% endif %}
+                    <footer><div class="table-person"><span class="avatar">{{ item.driver.initials }}</span><span><strong>{{ item.driver.full_name }}</strong><small>{{ item.driver.email }}</small></span></div><span class="pill {% if item.is_read %}pill-green{% else %}pill-yellow{% endif %}">{{ item.is_read|yesno:'Leído,Sin leer' }}</span></footer>
+                </article>
+            {% empty %}<div class="message-empty-state"><span><svg><use href="#i-mail"/></svg></span><strong>No hay mensajes con estos filtros</strong><p>Cuando envíes un aviso, reunión o reporte aparecerá aquí.</p><button type="button" class="btn btn-secondary" onclick="document.querySelector('#id_driver').focus()">Redactar el primero</button></div>{% endfor %}
+            </div>
+            {% if page.paginator.num_pages > 1 %}<nav class="pagination"><span>Página {{ page.number }} de {{ page.paginator.num_pages }}</span><div>{% if page.has_previous %}<a class="btn btn-sm btn-secondary" href="?q={{ query|urlencode }}&type={{ message_type }}&page={{ page.previous_page_number }}">Anterior</a>{% endif %}{% if page.has_next %}<a class="btn btn-sm btn-primary" href="?q={{ query|urlencode }}&type={{ message_type }}&page={{ page.next_page_number }}">Siguiente</a>{% endif %}</div></nav>{% endif %}
+        </section>
+    </div>
+</main>
+{% endblock %}

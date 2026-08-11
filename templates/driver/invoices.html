@@ -1,0 +1,52 @@
+{% extends 'base.html' %}{% load static %}
+{% block title %}Mis facturas{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{% static 'css/driver_panel.css' %}?v=20260810-140">{% endblock %}
+{% block content %}
+<header class="driver-page-heading driver-invoice-heading">
+    <div><span>DOCUMENTOS DE PAGO</span><h1>Mis facturas</h1><p>Consulta y descarga las facturas emitidas por MOVIX por cada mensualidad pagada.</p></div>
+    <a class="driver-outline-button" href="{% url 'panel:driver_payments' %}"><svg><use href="#i-inbox"/></svg> Ver mensualidades</a>
+</header>
+
+<section class="driver-invoice-summary" aria-label="Resumen de facturación">
+    <article class="driver-card"><span class="invoice-summary-icon blue"><svg><use href="#i-file"/></svg></span><div><small>Facturas emitidas</small><strong>{{ invoice_count }}</strong><span>documentos disponibles</span></div></article>
+    <article class="driver-card"><span class="invoice-summary-icon green"><svg><use href="#i-check"/></svg></span><div><small>Emitidas en {{ current_year }}</small><strong>{{ current_year_count }}</strong><span>durante este año</span></div></article>
+    <article class="driver-card"><span class="invoice-summary-icon orange"><svg><use href="#dp-money"/></svg></span><div><small>Total facturado</small><strong>USD {{ total_invoiced|floatformat:2 }}</strong><span>mensualidades acumuladas</span></div></article>
+</section>
+
+<section class="driver-card driver-invoice-workspace">
+    <header class="driver-invoice-workspace-heading">
+        <div><span class="eyebrow">HISTORIAL</span><h2>Facturas disponibles</h2><p>Busca por número, banco o método de pago.</p></div>
+        <span>{{ page.paginator.count }} resultado{{ page.paginator.count|pluralize }}</span>
+    </header>
+    <form method="get" class="driver-invoice-filters" data-auto-search data-auto-search-min="2">
+        <label class="driver-invoice-search"><svg><use href="#i-search"/></svg><input type="search" name="q" value="{{ query }}" placeholder="Buscar factura o banco..." aria-label="Buscar factura"></label>
+        <label><span>Año</span><select name="year" class="form-control" data-auto-submit><option value="all">Todos los años</option>{% for item in years %}<option value="{{ item }}" {% if year == item|stringformat:'s' %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></label>
+        <button class="driver-primary-button" type="submit"><svg><use href="#i-search"/></svg> Aplicar</button>
+        {% if query or year != 'all' %}<a class="driver-outline-button" href="{% url 'panel:driver_invoices' %}">Limpiar</a>{% endif %}
+    </form>
+
+    <div class="driver-invoice-grid">
+        {% for invoice in page %}
+        <article class="driver-invoice-card">
+            <header><span class="driver-invoice-document-icon"><svg><use href="#i-file"/></svg></span><div><small>Factura MOVIX</small><strong>{{ invoice.invoice_number }}</strong><span>Emitida el {{ invoice.issued_at|date:'d M Y · H:i' }}</span></div><b>Emitida</b></header>
+            <dl>
+                <div><dt>Mensualidad</dt><dd>{{ invoice.period|date:'F Y' }}</dd></div>
+                <div><dt>Valor</dt><dd>USD {{ invoice.amount|floatformat:2 }}</dd></div>
+                <div><dt>Forma de pago</dt><dd>{{ invoice.bank }} · {{ invoice.payment_method }}</dd></div>
+                <div><dt>Correo</dt><dd>{% if invoice.emailed_at %}<span class="invoice-mail-sent"><svg><use href="#i-check"/></svg> Enviada</span>{% else %}<span class="invoice-mail-pending">Pendiente</span>{% endif %}</dd></div>
+            </dl>
+            <footer>
+                {% if invoice.pdf_url %}
+                <button type="button" class="driver-outline-button" data-document-preview data-title="{{ invoice.invoice_number }}" data-file-name="{{ invoice.invoice_number }}.pdf" data-preview-url="{% url 'panel:driver_invoice_file' invoice.id 'view' %}" data-download-url="{% url 'panel:driver_invoice_file' invoice.id 'download' %}" data-preview-pdf="true"><svg><use href="#i-eye"/></svg> Vista previa</button>
+                <a class="driver-primary-button" href="{% url 'panel:driver_invoice_file' invoice.id 'download' %}"><svg><use href="#i-download"/></svg> Descargar PDF</a>
+                {% else %}<span class="invoice-file-missing">El PDF aún no está disponible</span>{% endif %}
+            </footer>
+        </article>
+        {% empty %}
+        <div class="driver-empty driver-invoice-empty"><svg><use href="#i-file"/></svg><b>No hay facturas con estos filtros</b><span>Cuando el administrador emita una factura aparecerá aquí y también en tu buzón.</span><a class="driver-outline-button" href="{% url 'panel:driver_payments' %}">Revisar mensualidades</a></div>
+        {% endfor %}
+    </div>
+
+    {% if page.paginator.num_pages > 1 %}<nav class="driver-pagination"><div>{% if page.has_previous %}<a href="?q={{ query|urlencode }}&year={{ year }}&page={{ page.previous_page_number }}">Anterior</a>{% endif %}</div><span>Página {{ page.number }} de {{ page.paginator.num_pages }}</span><div>{% if page.has_next %}<a href="?q={{ query|urlencode }}&year={{ year }}&page={{ page.next_page_number }}">Siguiente</a>{% endif %}</div></nav>{% endif %}
+</section>
+{% endblock %}

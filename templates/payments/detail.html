@@ -1,0 +1,37 @@
+{% extends 'base.html' %}{% load movix_tags %}
+{% block title %}Revisar mensualidad{% endblock %}
+{% block content %}
+<a class="back-link" href="{% url 'panel:monthly_payment_list' %}"><svg><use href="#i-arrow"/></svg>Volver a pagos</a>
+<header class="page-heading payment-detail-heading"><div><h1>Mensualidad · {{ payment.period|date:'F Y' }}</h1><p>{{ driver.full_name }} · {{ driver.email }}</p></div><span class="pill payment-pill status-{{ payment.status }}">{{ payment.status_label }}</span></header>
+<div class="payment-detail-grid">
+    <div>
+        <section class="card payment-driver-card"><div class="table-person">{% if driver_avatar_url %}<span class="avatar avatar-lg"><img src="{{ driver_avatar_url }}" alt="Foto de {{ driver.full_name }}"></span>{% else %}<span class="avatar avatar-lg">{{ driver.initials }}</span>{% endif %}<span><strong>{{ driver.full_name }}</strong><small>{{ driver.identity }} · {{ driver.phone|default:'Sin teléfono' }}</small></span></div><dl class="detail-list"><div><dt>Banco</dt><dd>{{ payment.bank_label }}</dd></div><div><dt>Modalidad</dt><dd>{{ payment.method_label }}</dd></div><div><dt>Valor</dt><dd>{% if payment.amount %}${{ payment.amount|floatformat:2 }}{% else %}No indicado{% endif %}</dd></div><div><dt>Enviado</dt><dd>{{ payment.created_at|date:'d M Y · H:i' }}</dd></div></dl></section>
+        <section class="card payment-account-card"><h2>Estado de la cuenta</h2><p class="pill {% if driver.is_active %}pill-green{% else %}pill-red{% endif %}">{{ driver.is_active|yesno:'Activa,Bloqueada' }}</p>{% if driver.blocked_reason %}<p><strong>Motivo:</strong> {{ driver.blocked_reason }}</p>{% endif %}{% if driver.is_active %}<form method="post" action="{% url 'panel:driver_payment_block' driver.id 'block' %}">{% csrf_token %}{{ block_form.reason.label_tag }}{{ block_form.reason }}{{ block_form.reason.errors }}<button class="btn btn-danger btn-block">Bloquear y notificar</button></form>{% else %}<form method="post" action="{% url 'panel:driver_payment_block' driver.id 'unblock' %}">{% csrf_token %}<button class="btn btn-primary btn-block">Habilitar y notificar</button></form>{% endif %}</section>
+    </div>
+    <div>
+        <section class="card payment-receipt-card"><h2>Comprobante adjunto</h2>{% if payment.receipt_url %}<button type="button" class="payment-receipt-preview" data-document-preview data-title="Comprobante · {{ payment.period|date:'F Y' }}" data-file-name="{{ payment.receipt_url|file_name }}" data-preview-url="{% url 'panel:monthly_payment_receipt' payment.id 'view' %}" data-download-url="{% url 'panel:monthly_payment_receipt' payment.id 'download' %}" data-preview-pdf="{{ payment.receipt_url|is_pdf|yesno:'true,false' }}">{% if payment.receipt_url|is_pdf %}<span class="asset-pdf-thumbnail"><iframe src="{% url 'panel:monthly_payment_receipt' payment.id 'view' %}#page=1&zoom=page-fit&toolbar=0&navpanes=0" title="Vista previa del comprobante" tabindex="-1"></iframe><span class="asset-pdf-badge"><svg><use href="#i-file"/></svg>PDF</span></span>{% else %}<img src="{% url 'panel:monthly_payment_receipt' payment.id 'view' %}" alt="Miniatura del comprobante">{% endif %}<span>Ampliar comprobante</span></button><strong class="asset-preview-name">{{ payment.receipt_url|file_name }}</strong><a class="asset-preview-download" href="{% url 'panel:monthly_payment_receipt' payment.id 'download' %}"><svg><use href="#i-download"/></svg>Descargar original</a>{% else %}<div class="empty-state">Pago físico, sin archivo adjunto.</div>{% endif %}</section>
+        <section class="card admin-payment-actions"><h2>Revisión administrativa</h2><form method="post" action="{% url 'panel:monthly_payment_review' payment.id 'approve' %}">{% csrf_token %}<button class="btn btn-success btn-block"><svg><use href="#i-check"/></svg>Aprobar mensualidad</button></form><form method="post" action="{% url 'panel:monthly_payment_review' payment.id 'reject' %}">{% csrf_token %}<textarea class="form-control" name="notes" maxlength="500" placeholder="Motivo obligatorio del rechazo"></textarea><button class="btn btn-danger btn-block"><svg><use href="#i-x"/></svg>Rechazar y notificar</button></form>{% if payment.admin_notes %}<p><strong>Nota actual:</strong> {{ payment.admin_notes }}</p>{% endif %}</section>
+        <section class="card invoice-control-card">
+            <header class="invoice-control-heading">
+                <span class="invoice-control-icon"><svg><use href="#i-file"/></svg></span>
+                <div><span class="eyebrow">FACTURACIÓN</span><h2>Factura de mensualidad</h2><p>Genera el PDF, guárdalo en el buzón privado y envíalo al correo del transportista.</p></div>
+                <span class="pill {% if invoice %}pill-green{% else %}pill-blue{% endif %}">{% if invoice %}Emitida{% else %}Lista para emitir{% endif %}</span>
+            </header>
+            {% if invoice %}
+            <div class="invoice-issued-panel">
+                <div class="invoice-issued-title"><span><svg><use href="#i-check"/></svg></span><div><small>Documento emitido</small><strong>{{ invoice.invoice_number }}</strong></div></div>
+                <dl class="invoice-meta-grid"><div><dt>Fecha</dt><dd>{{ invoice.issued_at|date:'d M Y · H:i' }}</dd></div><div><dt>Entrega por correo</dt><dd>{% if invoice.emailed_at %}Enviada el {{ invoice.emailed_at|date:'d M · H:i' }}{% else %}Pendiente de envío{% endif %}</dd></div></dl>
+                <div class="invoice-document-actions"><a class="btn btn-secondary" href="{% url 'panel:driver_invoice_file' invoice.id 'view' %}" target="_blank"><svg><use href="#i-eye"/></svg> Vista previa</a><a class="btn btn-secondary" href="{% url 'panel:driver_invoice_file' invoice.id 'download' %}"><svg><use href="#i-download"/></svg> Descargar PDF</a></div>
+            </div>
+            {% else %}
+            <div class="invoice-readiness">
+                <div class="invoice-readiness-step {% if payment.status == 'approved' %}ready{% endif %}"><span>1</span><div><strong>Pago aprobado</strong><small>{% if payment.status == 'approved' %}La mensualidad está validada.{% else %}Aprueba primero el comprobante.{% endif %}</small></div></div>
+                <div class="invoice-readiness-step {% if payment.amount %}ready{% endif %}"><span>2</span><div><strong>Valor registrado</strong><small>{% if payment.amount %}USD {{ payment.amount|floatformat:2 }} confirmado.{% else %}Registra el valor recibido.{% endif %}</small></div></div>
+                <div class="invoice-readiness-step"><span>3</span><div><strong>Emitir y entregar</strong><small>Se enviará a {{ driver.email }}.</small></div></div>
+            </div>
+            {% endif %}
+            <form class="invoice-send-form" method="post" action="{% url 'panel:monthly_payment_invoice' payment.id %}">{% csrf_token %}<button class="btn btn-primary btn-block" {% if payment.status != 'approved' or not payment.amount %}disabled title="Aprueba el pago y registra un valor antes de facturar"{% endif %}><svg><use href="#i-mail"/></svg>{% if invoice %}Reenviar factura por correo{% else %}Generar y enviar factura{% endif %}</button><small>Destino: {{ driver.email }} · también quedará disponible en “Mis facturas”.</small></form>
+        </section>
+    </div>
+</div>
+{% endblock %}

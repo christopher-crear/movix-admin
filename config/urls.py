@@ -1,18 +1,12 @@
 from django.contrib import admin
-from django.contrib.auth import views as auth_views
 from django.urls import include, path
+
+from panel import views as panel_views
 
 
 urlpatterns = [
     path("django-admin/", admin.site.urls),
-    path(
-        "login/",
-        auth_views.LoginView.as_view(
-            template_name="registration/login.html",
-            redirect_authenticated_user=True,
-        ),
-        name="login",
-    ),
-    path("logout/", auth_views.LogoutView.as_view(), name="logout"),
+    path("login/", panel_views.access_login, name="login"),
+    path("logout/", panel_views.access_logout, name="logout"),
     path("", include("panel.urls")),
 ]

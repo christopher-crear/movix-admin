@@ -1,6 +1,6 @@
 # MOVIX Admin
 
-Panel administrativo de producción desarrollado con Django, Supabase PostgreSQL, Supabase Storage, Firebase Cloud Messaging opcional y Render.
+Panel administrativo y portal privado de transportistas desarrollado con Django, Supabase PostgreSQL, Supabase Auth, Supabase Storage, Firebase Cloud Messaging opcional y Render.
 
 El sistema utiliza las tablas existentes de la app móvil (`profiles`, `rides`, `driver_reviews` y `notifications`). Los modelos correspondientes tienen `managed = False`, por lo que Django no intenta recrearlas. El archivo `sql/supabase_panel.sql` incorpora únicamente los campos y tablas que faltaban para el panel.
 
@@ -14,9 +14,26 @@ El sistema utiliza las tablas existentes de la app móvil (`profiles`, `rides`, 
 - Animaciones suaves en tarjetas, teléfono flotante y secciones al hacer scroll.
 - Información enfocada en transporte de carga liviana en Loja, Ecuador.
 - Formulario público protegido con CSRF, campo trampa y límite básico por IP.
-- Módulo **Solicitudes** para buscar, leer, responder, cerrar y dar seguimiento a contactos.
+- Módulo **Solicitudes** para buscar, leer, responder por correo, cerrar y dar seguimiento a contactos.
 - Secciones de descarga, vehículos, testimonios, métodos de pago, preguntas frecuentes y redes de contacto.
-- Inicio de sesión exclusivo para cuentas Django con `is_staff=True`.
+- Inicio de sesión unificado y enrutamiento seguro por rol.
+- Administradores mediante cuenta Django con `is_staff=True`.
+- Transportistas mediante correo/contraseña de Supabase Auth o Google.
+- Portal privado del transportista con ganancias semanales y diarias, viajes, distancia y calificación.
+- Listado paginado de carreras asignadas, filtros y detalle completo de cada servicio.
+- Comentarios y calificaciones reales de `driver_reviews` con distribución por estrellas.
+- Perfil del transportista con vehículo, documentos, edición y cambio de contraseña de Supabase.
+- Selector controlado de vehículo: Camioneta, Camión pequeño o Camión mediano.
+- Estado y visualización segura de todos los documentos cargados por el transportista.
+- Mensualidades con Banco de Loja, Banco Pichincha, Banco Coopego o Cooperativa JEP; admite transferencia, depósito y comprobantes JPG/PNG/WEBP/PDF.
+- Directorio bancario administrable con logos, titular, cuenta, instrucciones y código QR opcional; solo las cuentas activas se muestran al transportista.
+- Revisión administrativa de pagos, registro de pagos físicos, aprobación, rechazo y notificación.
+- Factura PDF automática para pagos aprobados, guardada en Supabase Storage y entregada al correo y al buzón privado del transportista.
+- Módulo privado **Mis facturas** con búsqueda, filtro anual, vista previa y descarga individual de cada PDF.
+- Buzón paginado con filtros para facturas, reuniones, pagos, estado de cuenta y avisos generales.
+- Bloqueo o habilitación manual por falta de pago mediante `profiles.is_active`, con motivo visible para la app móvil y notificación interna/FCM.
+- Foto real del cliente en el detalle de cada carrera cuando existe en Supabase.
+- Aislamiento de datos: cada conductor solo consulta carreras y reseñas asociadas a su UUID.
 - Dashboard con contadores y gráficos calculados desde la base real.
 - Usuarios y transportistas separados según el campo `profiles.role`.
 - Creación integrada con Supabase Auth y `public.profiles`.
@@ -51,6 +68,24 @@ El script puede ejecutarse más de una vez. No elimina información existente.
 También sincroniza los registros antiguos que ya tenían `verified` o
 `profile_verified=true`, por lo que conservarán correctamente su estado aprobado.
 
+Si ya habías ejecutado una versión anterior de `supabase_panel.sql`, puedes
+instalar las ampliaciones ejecutando, en este orden:
+
+```text
+sql/monthly_payments.sql
+sql/payment_banks_inbox_invoices.sql
+```
+
+El segundo archivo crea las tablas `payment_bank_accounts`, `driver_invoices`
+y `driver_inbox_messages`, sus relaciones, índices y políticas RLS. También
+registra los cuatro bancos como ocultos. En el panel entra en **Bancos y
+cuentas**, completa los datos reales y activa únicamente los que usarás.
+
+La app móvil debe comprobar `profiles.is_active` después del inicio de sesión y
+antes de permitir solicitudes/aceptaciones. Cuando el administrador bloquea una
+cuenta, el panel establece `is_active=false`, guarda `blocked_reason` y crea una
+fila en `notifications` para que la app muestre el motivo.
+
 ## 2. Preparar el proyecto en Windows
 
 Abre PowerShell en la carpeta del proyecto:
@@ -78,7 +113,45 @@ Edita `.env` y coloca tus valores. No publiques ese archivo ni compartas la clav
 | `DATABASE_URL` | Supabase → Connect → Session pooler, puerto 5432 |
 | `SUPABASE_URL` | Supabase → Project Settings → API |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Project Settings → API → clave secreta del servidor |
+| `SUPABASE_ANON_KEY` | Supabase → Project Settings → API Keys → Publishable/anon key |
 | `SECRET_KEY` | Genera una clave de Django |
+
+### Configurar Gmail para facturas, avisos y respuestas
+
+MOVIX usa el mismo correo SMTP para enviar facturas, reuniones, avisos y las
+respuestas del módulo **Solicitudes**. No debes colocar la contraseña normal de
+Gmail:
+
+1. Entra en la cuenta que enviará los mensajes, por ejemplo
+   `movix_soporte@gmail.com`.
+2. Abre **Cuenta de Google → Seguridad** y activa la verificación en dos pasos.
+3. Busca **Contraseñas de aplicaciones**, crea una con el nombre `MOVIX Render`
+   y copia la clave de 16 caracteres.
+4. Configura estas variables tanto en `.env` como en Render → Environment:
+
+```env
+EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+EMAIL_HOST=smtp.gmail.com
+EMAIL_PORT=587
+EMAIL_HOST_USER=movix_soporte@gmail.com
+EMAIL_HOST_PASSWORD=CLAVE_DE_APLICACION_DE_16_CARACTERES
+EMAIL_USE_TLS=True
+DEFAULT_FROM_EMAIL="MOVIX <movix_soporte@gmail.com>"
+```
+
+5. Reinicia `runserver` en local o ejecuta **Manual Deploy** en Render.
+
+Puedes comprobar el envío desde la consola del proyecto, reemplazando el correo
+de destino:
+
+```powershell
+python manage.py shell -c "from panel.services import send_movix_email; print(send_movix_email('TU_CORREO@gmail.com', 'Prueba MOVIX', 'El correo de MOVIX funciona correctamente.'))"
+```
+
+El resultado correcto es `(True, '')`. Si SMTP falla, las facturas y respuestas
+siguen guardadas en el sistema, pero se muestran como pendientes de envío junto
+con el error devuelto por Gmail. Nunca publiques `.env` ni la contraseña de
+aplicación en GitHub.
 
 Genera `SECRET_KEY` con:
 
@@ -109,7 +182,11 @@ python manage.py migrate panel 0002 --fake
 python manage.py migrate
 ```
 
-La cuenta creada con `createsuperuser` es la que permite entrar al panel. Los clientes y transportistas no pueden iniciar sesión aquí.
+La cuenta creada con `createsuperuser` permite entrar al panel administrativo. Los
+transportistas ingresan en la misma pantalla con el correo y contraseña que ya
+usan en Supabase Auth. Django comprueba el UUID autenticado en `public.profiles`
+y abre automáticamente el portal del transportista. Las cuentas de clientes no
+reciben acceso a este portal web.
 
 Ejecuta:
 
@@ -118,14 +195,43 @@ python manage.py runserver
 ```
 
 Abre `http://127.0.0.1:8000/` para ver la página pública y
-`http://127.0.0.1:8000/login/` para entrar al panel.
+`http://127.0.0.1:8000/login/` para entrar. El rol autenticado decide si se abre
+el panel administrativo o `/transportista/`.
 
 Los datos públicos de contacto se pueden cambiar en `.env` mediante
 `MOVIX_SUPPORT_EMAIL`, `MOVIX_WHATSAPP_NUMBER`, `MOVIX_WHATSAPP_DISPLAY` y
-`MOVIX_FACEBOOK_URL`. El panel administrativo no está enlazado desde la página
-pública.
+`MOVIX_FACEBOOK_URL`. La página pública enlaza el **Portal transportista**, pero
+nunca expone permisos administrativos. Entrar a `/login/` no concede acceso:
+cada ruta vuelve a validar la sesión y el rol.
 
-## 4. Archivos y Supabase Storage
+## 4. Iniciar sesión con Google mediante Supabase
+
+1. En Google Cloud crea credenciales **OAuth 2.0 / Aplicación web**.
+2. En **URI de redireccionamiento autorizados** agrega:
+
+```text
+https://PROJECT_REF.supabase.co/auth/v1/callback
+```
+
+3. En Supabase abre **Authentication → Providers → Google**, actívalo y pega el
+   Client ID y Client Secret de Google.
+4. En **Authentication → URL Configuration → Redirect URLs** agrega:
+
+```text
+http://127.0.0.1:8000/auth/callback/
+http://localhost:8000/auth/callback/
+https://TU-SERVICIO.onrender.com/auth/callback/
+```
+
+5. Comprueba que el usuario de Google tenga una fila en `public.profiles` con el
+   mismo UUID de `auth.users.id` y un rol aceptado: `transportista`, `conductor`
+   o `driver`.
+
+El navegador recibe el token OAuth en el fragmento de la URL y lo entrega por
+POST con CSRF a Django. El servidor vuelve a validarlo contra Supabase antes de
+crear la sesión del portal.
+
+## 5. Archivos y Supabase Storage
 
 El SQL crea dos buckets:
 
@@ -139,8 +245,32 @@ la clave secreta. Aun así, ejecuta `sql/supabase_panel.sql` para instalar colum
 índices, sincronización de fotos y estados de verificación.
 
 El panel admite JPG, PNG, WEBP y PDF, hasta 10 MB por defecto.
+La foto o PDF de la cédula puede renovarse desde **Mi perfil** del transportista;
+al cambiar un documento sensible el perfil vuelve a estado pendiente para una
+nueva revisión administrativa.
 
-## 5. Notificaciones push
+## 6. Bancos, facturas y buzón en la app móvil
+
+La app puede leer las cuentas visibles, las facturas del usuario autenticado y
+su propio buzón gracias a las políticas RLS:
+
+```javascript
+const { data: banks } = await supabase
+  .from('payment_bank_accounts')
+  .select('*')
+  .eq('is_active', true)
+  .order('sort_order')
+
+const { data: inbox } = await supabase
+  .from('driver_inbox_messages')
+  .select('*, driver_invoices(*)')
+  .order('created_at', { ascending: false })
+```
+
+Para marcar un mensaje como leído, actualiza únicamente `is_read` y `read_at`.
+La política impide consultar mensajes o facturas de otro transportista.
+
+## 7. Notificaciones push
 
 Las notificaciones internas funcionan inmediatamente y se guardan en `public.notifications`.
 
@@ -163,7 +293,7 @@ await supabase.from('device_tokens').upsert({
 
 Si Firebase aún no está configurado, el panel guarda las notificaciones internas y muestra `0 push`; no se pierde el mensaje.
 
-## 6. Publicidad en la app móvil
+## 8. Publicidad en la app móvil
 
 La aplicación puede consultar los banners visibles así:
 
@@ -177,12 +307,14 @@ const { data } = await supabase
 
 La política RLS incluida solamente permite leer anuncios activos y dentro de sus fechas.
 
-## 7. Publicar en Render
+## 9. Publicar en Render
 
 1. Sube esta carpeta a un repositorio privado de GitHub.
 2. En Render selecciona **New → Blueprint**.
 3. Conecta el repositorio; Render detectará `render.yaml`.
 4. Completa las variables marcadas como secretas.
+   Incluye `SUPABASE_ANON_KEY`; la `SERVICE_ROLE_KEY` no reemplaza esta
+   configuración de acceso de Supabase Auth.
 5. En `ALLOWED_HOSTS` coloca `tu-servicio.onrender.com`.
 6. En `CSRF_TRUSTED_ORIGINS` coloca `https://tu-servicio.onrender.com`.
 7. Cuando termine el despliegue, abre **Shell** y ejecuta:
@@ -193,7 +325,11 @@ python manage.py createsuperuser
 
 Render ejecuta automáticamente instalación, archivos estáticos, migraciones y comprobaciones de producción con `build.sh`.
 
-## 8. Correspondencia con la base existente
+Después del primer despliegue añade la URL exacta de Render terminada en
+`/auth/callback/` a las Redirect URLs de Supabase. Si cambias variables, ejecuta
+**Manual Deploy → Clear build cache & deploy**.
+
+## 9. Correspondencia con la base existente
 
 | Módulo | Tabla principal |
 |---|---|
@@ -211,8 +347,17 @@ Render ejecuta automáticamente instalación, archivos estáticos, migraciones y
 ## Seguridad
 
 - Nunca coloques `SUPABASE_SERVICE_ROLE_KEY` en la app móvil o en JavaScript del navegador.
+- La clave anon/publishable identifica el proyecto, pero no reemplaza las
+  políticas RLS ni concede privilegios administrativos.
 - Usa un repositorio privado y mantén `.env` fuera de Git.
-- El panel exige `is_staff=True` en todas las rutas.
+- El panel administrativo exige `is_staff=True`; las vistas de transportista
+  exigen una sesión Supabase válida enlazada a un perfil transportista activo.
+- El correo por sí solo no concede permisos: Google y Supabase respetan
+  `profiles.role`; una cuenta administrativa por OAuth requiere además un rol
+  administrativo explícito y un usuario Django `is_staff` habilitado.
+- Ambos roles usan la misma interfaz web. Las URL y el menú se construyen según
+  el rol, sin exponer enlaces administrativos al transportista.
+- El detalle de carrera filtra simultáneamente por `ride.id` y `driver_id`.
 - Los archivos se validan por tamaño y tipo.
 - Los documentos privados usan enlaces con caducidad.
 - Las eliminaciones muestran confirmación y se registran en auditoría.

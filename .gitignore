@@ -1,6 +1,8 @@
 .env
 venv/
 .venv/
+.test-venv/
+pip-*/
 __pycache__/
 *.py[cod]
 *.sqlite3

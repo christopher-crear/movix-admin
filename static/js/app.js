@@ -29,8 +29,39 @@
   dialog?.querySelector('[data-dialog-confirm]')?.addEventListener('click', () => { if (pendingForm) { pendingForm.dataset.confirmed = 'true'; pendingForm.submit(); } dialog.close(); });
 
   document.querySelectorAll('input[type="file"]').forEach(input => input.addEventListener('change', () => {
-    const label = input.closest('label'); const target = label?.querySelector('[data-file-name]');
-    if (target) target.textContent = input.files?.[0]?.name || 'Ningún archivo seleccionado';
+    const host = input.closest('[data-local-upload]');
+    const label = input.closest('label');
+    const target = label?.querySelector('[data-file-name]') || host?.querySelector('[data-file-name]');
+    const file = input.files?.[0];
+    if (target) target.textContent = file?.name || 'Ningún archivo seleccionado';
+
+    // Previsualización local, pequeña y proporcional antes de guardar.
+    const preview = host?.querySelector('.local-file-preview');
+    const image = preview?.querySelector('img');
+    const pdfFrame = preview?.querySelector('.local-pdf-frame');
+    if (!preview || !image) return;
+    const previousUrl = preview.dataset.objectUrl;
+    if (previousUrl) URL.revokeObjectURL(previousUrl);
+    preview.classList.remove('active', 'is-pdf');
+    image.removeAttribute('src');
+    pdfFrame?.removeAttribute('src');
+    if (!file) return;
+    preview.classList.add('active');
+    if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+      preview.classList.add('is-pdf');
+      const objectUrl = URL.createObjectURL(file);
+      preview.dataset.objectUrl = objectUrl;
+      if (pdfFrame) pdfFrame.src = `${objectUrl}#page=1&zoom=page-fit&toolbar=0&navpanes=0`;
+      return;
+    }
+    const objectUrl = URL.createObjectURL(file);
+    preview.dataset.objectUrl = objectUrl;
+    image.src = objectUrl;
+  }));
+
+  // Nunca se muestra el icono roto del navegador dentro de una tarjeta.
+  document.querySelectorAll('[data-media-thumb]').forEach(image => image.addEventListener('error', () => {
+    image.closest('.asset-preview-canvas')?.classList.add('is-error');
   }));
 
   // Buscadores de tablas: consulta automática desde dos caracteres.
@@ -96,6 +127,7 @@
   const closePreview = () => {
     if (previewImage) previewImage.removeAttribute('src');
     if (previewFrame) previewFrame.removeAttribute('src');
+    previewStage?.classList.remove('loading', 'preview-error');
     previewDialog?.close();
   };
   document.querySelectorAll('[data-document-preview]').forEach(button => button.addEventListener('click', () => {
@@ -105,14 +137,20 @@
     previewDialog.querySelector('#documentPreviewName').textContent = button.dataset.fileName || '';
     const download = previewDialog.querySelector('#documentPreviewDownload');
     download.href = button.dataset.downloadUrl;
+    previewStage?.classList.remove('preview-error');
     previewStage?.classList.add('loading');
     previewStage?.classList.toggle('show-pdf', isPdf);
-    if (isPdf && previewFrame) previewFrame.src = button.dataset.previewUrl;
-    if (!isPdf && previewImage) previewImage.src = button.dataset.previewUrl;
+    if (isPdf) {
+      previewImage?.removeAttribute('src');
+      if (previewFrame) previewFrame.src = `${button.dataset.previewUrl}#page=1&zoom=page-width&toolbar=1&navpanes=1`;
+    } else {
+      previewFrame?.removeAttribute('src');
+      if (previewImage) previewImage.src = button.dataset.previewUrl;
+    }
     previewDialog.showModal();
   }));
-  previewImage?.addEventListener('load', () => previewStage?.classList.remove('loading'));
-  previewImage?.addEventListener('error', () => previewStage?.classList.remove('loading'));
+  previewImage?.addEventListener('load', () => previewStage?.classList.remove('loading', 'preview-error'));
+  previewImage?.addEventListener('error', () => { previewStage?.classList.remove('loading'); previewStage?.classList.add('preview-error'); });
   previewFrame?.addEventListener('load', () => previewStage?.classList.remove('loading'));
   previewDialog?.querySelector('[data-preview-close]')?.addEventListener('click', closePreview);
   previewDialog?.addEventListener('click', event => {
@@ -136,6 +174,51 @@
   const message = document.getElementById('id_message'); const count = document.querySelector('[data-char-count]');
   const updateCount = () => { if (count) count.textContent = message?.value.length || 0; };
   message?.addEventListener('input', updateCount); updateCount();
+
+  // Mensualidad del transportista: las tarjetas solo abren información y el
+  // formulario conserva opciones válidas según la forma de pago elegida.
+  document.querySelectorAll('[data-bank-dialog-open]').forEach(button => button.addEventListener('click', () => {
+    const dialog = document.getElementById(button.dataset.bankDialogOpen);
+    if (dialog?.showModal) dialog.showModal();
+  }));
+  document.querySelectorAll('.driver-bank-dialog').forEach(dialog => {
+    dialog.querySelectorAll('[data-bank-dialog-close]').forEach(button => button.addEventListener('click', () => dialog.close()));
+    dialog.addEventListener('click', event => {
+      if (event.target !== dialog) return;
+      const rect = dialog.getBoundingClientRect();
+      if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) dialog.close();
+    });
+  });
+
+  const paymentForm = document.getElementById('driverPaymentForm');
+  if (paymentForm) {
+    const bankSelect = paymentForm.querySelector('#id_bank');
+    const methodSelect = paymentForm.querySelector('#id_payment_method');
+    const receiptInput = paymentForm.querySelector('input[type="file"][name="receipt"]');
+    const receiptField = paymentForm.querySelector('[data-payment-receipt-field]');
+    const methodHelp = paymentForm.querySelector('[data-payment-method-help] span');
+    const syncPaymentMethod = () => {
+      const physical = methodSelect?.value === 'cash';
+      if (physical && bankSelect) bankSelect.value = 'physical';
+      if (!physical && bankSelect?.value === 'physical') bankSelect.value = '';
+      if (receiptInput) receiptInput.required = !physical;
+      receiptField?.classList.toggle('is-optional', physical);
+      if (methodHelp) methodHelp.textContent = physical
+        ? 'El pago físico no requiere comprobante. El administrador registrará y confirmará la mensualidad.'
+        : 'Selecciona una cuenta bancaria y adjunta el comprobante de la transferencia o depósito.';
+    };
+    methodSelect?.addEventListener('change', syncPaymentMethod);
+    syncPaymentMethod();
+
+    document.querySelectorAll('[data-use-payment-bank]').forEach(button => button.addEventListener('click', () => {
+      if (bankSelect) bankSelect.value = button.dataset.usePaymentBank;
+      if (methodSelect) methodSelect.value = 'transfer';
+      syncPaymentMethod();
+      button.closest('dialog')?.close();
+      paymentForm.scrollIntoView({behavior: 'smooth', block: 'center'});
+      window.setTimeout(() => bankSelect?.focus(), 350);
+    }));
+  }
 
   const rawData = document.getElementById('dashboard-data');
   if (rawData) {

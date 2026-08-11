@@ -1,19 +1,45 @@
 {% extends 'base.html' %}{% load movix_tags %}
 {% block title %}{{ profile.full_name }}{% endblock %}
 {% block content %}
-<div class="breadcrumb-actions"><a class="back-link" href="{% url 'panel:profile_list' kind %}"><svg><use href="#i-arrow"/></svg>{{ config.plural }}</a><a class="btn btn-secondary" href="{% url 'panel:profile_edit' kind profile.id %}"><svg><use href="#i-edit"/></svg> Editar</a></div>
+<div class="breadcrumb-actions">
+    <a class="back-link" href="{% url 'panel:profile_list' kind %}"><svg><use href="#i-arrow"/></svg>{{ config.plural }}</a>
+    <a class="btn btn-secondary" href="{% url 'panel:profile_edit' kind profile.id %}"><svg><use href="#i-edit"/></svg> Editar</a>
+</div>
+
 <article class="card profile-hero">
-    <div class="profile-identity">{% include 'panel/_avatar.html' with person=profile avatar_class='avatar avatar-xl' %}<div><div class="title-with-status"><h1>{{ profile.full_name }}</h1><span class="pill {% if profile.is_active %}pill-green{% else %}pill-red{% endif %}">{{ profile.status_label }}</span></div><p>ID: {{ profile.identity }} · {{ profile.email|default:'Sin correo' }}</p><div class="badge-row"><span class="pill {% if profile.effective_verification_status == 'approved' %}pill-blue{% elif profile.effective_verification_status == 'rejected' %}pill-red{% else %}pill-yellow{% endif %}">{% if profile.effective_verification_status == 'approved' %}✓ Verificado{% else %}{{ profile.verification_label }}{% endif %}</span><span class="pill"><svg><use href="#i-map-pin"/></svg> Loja</span></div></div></div>
+    <div class="profile-identity">
+        {% include 'panel/_avatar.html' with person=profile avatar_class='avatar avatar-xl' %}
+        <div>
+            <div class="title-with-status"><h1>{{ profile.full_name }}</h1><span class="pill {% if profile.is_active %}pill-green{% else %}pill-red{% endif %}">{{ profile.status_label }}</span></div>
+            <p>ID: {{ profile.identity }} · {{ profile.email|default:'Sin correo' }}</p>
+            <div class="badge-row"><span class="pill {% if profile.effective_verification_status == 'approved' %}pill-blue{% elif profile.effective_verification_status == 'rejected' %}pill-red{% else %}pill-yellow{% endif %}">{% if profile.effective_verification_status == 'approved' %}✓ Verificado{% else %}{{ profile.verification_label }}{% endif %}</span><span class="pill"><svg><use href="#i-map-pin"/></svg> Loja</span></div>
+        </div>
+    </div>
     <div class="profile-metrics"><div><strong>{{ profile.rating }}</strong><span>Calificación</span></div><div><strong>{{ ride_count }}</strong><span>{% if kind == 'drivers' %}Servicios{% else %}Solicitudes{% endif %}</span></div>{% if kind == 'drivers' %}<div><strong>{{ profile.experience_years }}</strong><span>Años exp.</span></div>{% endif %}</div>
 </article>
 
 <div class="detail-grid">
     <section class="card document-summary">
-        <div class="verification-banner {% if profile.effective_verification_status == 'rejected' %}rejected{% elif profile.effective_verification_status != 'approved' %}pending{% endif %}"><i><svg><use href="{% if profile.effective_verification_status == 'approved' %}#i-check{% elif profile.effective_verification_status == 'rejected' %}#i-x{% else %}#i-file{% endif %}"/></svg></i><div><strong>{% if profile.effective_verification_status == 'approved' %}✓ {{ config.singular }} verificado{% elif profile.effective_verification_status == 'rejected' %}Verificación rechazada{% else %}Verificación pendiente{% endif %}</strong><span>{{ profile.verification_rejection_reason|default:'Documentos y datos generales de MOVIX' }}</span></div></div>
-        <h2>Cédula de identidad</h2>
-        {% if profile.identification_photo_url %}<button class="media-preview" type="button" data-document-preview data-title="Cédula de identidad" data-file-name="{{ profile.identification_photo_url|file_name }}" data-preview-url="{% url 'panel:document_access' profile.id 'identification' 'view' %}" data-download-url="{% url 'panel:document_access' profile.id 'identification' 'download' %}" data-preview-pdf="{{ profile.identification_photo_url|is_pdf|yesno:'true,false' }}"><svg><use href="#i-id"/></svg><span>Ver cédula de identidad</span></button>{% else %}<div class="media-preview disabled"><svg><use href="#i-id"/></svg><span>Foto de cédula no cargada</span></div>{% endif %}
-        {% if kind == 'drivers' %}<div class="vehicle-card"><h2><svg><use href="#i-truck"/></svg> Vehículo registrado</h2>{% if profile.vehicle_photo_url %}<button class="media-preview small" type="button" data-document-preview data-title="Foto del vehículo" data-file-name="{{ profile.vehicle_photo_url|file_name }}" data-preview-url="{% url 'panel:document_access' profile.id 'vehicle' 'view' %}" data-download-url="{% url 'panel:document_access' profile.id 'vehicle' 'download' %}" data-preview-pdf="false"><svg><use href="#i-truck"/></svg><span>Ver foto del vehículo</span></button>{% else %}<div class="media-preview small disabled"><svg><use href="#i-truck"/></svg><span>Foto del vehículo no cargada</span></div>{% endif %}<dl><div><dt>Tipo</dt><dd>{{ profile.vehicle_type|default:'—' }}</dd></div><div><dt>Placa</dt><dd>{{ profile.vehicle_plate|default:'—' }}</dd></div><div><dt>Capacidad</dt><dd>{{ profile.load_capacity|default:'0' }} kg</dd></div></dl></div><a class="btn btn-primary btn-block" href="{% url 'panel:verification_detail' profile.id %}"><svg><use href="#i-file"/></svg> Ver todos los documentos</a>{% endif %}
+        <div class="verification-banner {% if profile.effective_verification_status == 'rejected' %}rejected{% elif profile.effective_verification_status != 'approved' %}pending{% endif %}">
+            <i><svg><use href="{% if profile.effective_verification_status == 'approved' %}#i-check{% elif profile.effective_verification_status == 'rejected' %}#i-x{% else %}#i-file{% endif %}"/></svg></i>
+            <div><strong>{% if profile.effective_verification_status == 'approved' %}✓ {{ config.singular }} verificado{% elif profile.effective_verification_status == 'rejected' %}Verificación rechazada{% else %}Verificación pendiente{% endif %}</strong><span>{{ profile.verification_rejection_reason|default:'Documentos y datos generales de MOVIX' }}</span></div>
+        </div>
+
+        <div class="profile-document-previews">
+            {% for document in summary_documents %}
+            {% include 'panel/_document_preview_card.html' with profile=profile document=document card_class='profile-asset-card' %}
+            {% endfor %}
+        </div>
+
+        {% if kind == 'drivers' %}
+        <div class="vehicle-card vehicle-data-card">
+            <h2><svg><use href="#i-truck"/></svg> Datos del vehículo</h2>
+            <dl><div><dt>Tipo</dt><dd>{{ profile.vehicle_type_label }}</dd></div><div><dt>Placa</dt><dd>{{ profile.vehicle_plate|default:'—' }}</dd></div><div><dt>Capacidad</dt><dd>{{ profile.load_capacity|default:'0' }} kg</dd></div></dl>
+        </div>
+        <a class="btn btn-primary btn-block" href="{% url 'panel:verification_detail' profile.id %}"><svg><use href="#i-file"/></svg> Ver todos los documentos</a>
+        {% endif %}
     </section>
+
     <div class="detail-column">
         <section class="card info-card"><h2>Datos de perfil</h2><dl><div><dt>Correo</dt><dd>{{ profile.email|default:'—' }}</dd></div><div><dt>Teléfono</dt><dd>{{ profile.phone|default:'—' }}</dd></div><div><dt>Identificación</dt><dd>{{ profile.identity }}</dd></div><div><dt>Miembro desde</dt><dd>{{ profile.created_at|date:'M Y'|default:'—' }}</dd></div></dl></section>
         <section class="card reviews-card"><h2><svg><use href="#i-star"/></svg> Calificaciones</h2>{% if kind == 'drivers' %}<div class="rating-summary"><strong>{{ profile.rating }}</strong><span class="stars">{{ profile.rating|stars }}</span><small>{{ profile.completed_trips }} servicios completados</small></div>{% endif %}{% for review in reviews %}<div class="review-row">{% if kind == 'drivers' %}{% include 'panel/_avatar.html' with person=review.client avatar_class='avatar avatar-sm' %}{% else %}{% include 'panel/_avatar.html' with person=review.driver avatar_class='avatar avatar-sm' %}{% endif %}<div><strong>{% if kind == 'drivers' %}{{ review.client.full_name }}{% else %}{{ review.driver.full_name }}{% endif %}</strong><span class="stars">{{ review.rating|stars }}</span><p>{{ review.comment|default:'Sin comentario' }}</p></div></div>{% empty %}<div class="empty-state">Aún no hay calificaciones.</div>{% endfor %}</section>

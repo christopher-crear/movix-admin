@@ -30,6 +30,6 @@
     {% empty %}<tr><td colspan="8"><div class="empty-state"><svg><use href="#i-users"/></svg><strong>No encontramos registros</strong><span>Prueba otro filtro o crea el primer registro.</span></div></td></tr>{% endfor %}
     </tbody>
 </table></div>
-{% if page.paginator.num_pages > 1 %}<nav class="pagination">{% if page.has_previous %}<a href="?q={{ query }}&status={{ status }}&page={{ page.previous_page_number }}">Anterior</a>{% endif %}<span>Página {{ page.number }} de {{ page.paginator.num_pages }}</span>{% if page.has_next %}<a href="?q={{ query }}&status={{ status }}&page={{ page.next_page_number }}">Siguiente</a>{% endif %}</nav>{% endif %}
+{% if page.paginator.num_pages > 1 %}<nav class="pagination">{% if page.has_previous %}<a href="?q={{ query|urlencode }}&status={{ status }}&page={{ page.previous_page_number }}">Anterior</a>{% endif %}<span>Página {{ page.number }} de {{ page.paginator.num_pages }}</span>{% if page.has_next %}<a href="?q={{ query|urlencode }}&status={{ status }}&page={{ page.next_page_number }}">Siguiente</a>{% endif %}</nav>{% endif %}
 </div>
 {% endblock %}

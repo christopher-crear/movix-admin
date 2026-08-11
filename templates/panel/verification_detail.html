@@ -17,15 +17,12 @@
             </section>
             {% if profile.is_driver %}<section class="soft-card">
                 <h3><svg><use href="#i-truck"/></svg> Datos del vehículo</h3>
-                <dl><div><dt>Placa</dt><dd>{{ profile.vehicle_plate|default:'—' }}</dd></div><div><dt>Capacidad</dt><dd>{{ profile.load_capacity|default:'—' }} kg</dd></div><div><dt>Año</dt><dd>{{ profile.vehicle_year|default:'—' }}</dd></div><div><dt>Tipo</dt><dd>{{ profile.vehicle_type|default:'—' }}</dd></div></dl>
+                <dl><div><dt>Placa</dt><dd>{{ profile.vehicle_plate|default:'—' }}</dd></div><div><dt>Capacidad</dt><dd>{{ profile.load_capacity|default:'—' }} kg</dd></div><div><dt>Año</dt><dd>{{ profile.vehicle_year|default:'—' }}</dd></div><div><dt>Tipo</dt><dd>{{ profile.vehicle_type_label }}</dd></div></dl>
             </section>{% endif %}
         </div>
         <div class="documents-grid">
             {% for document in documents %}
-            <section class="soft-card document-card">
-                <header><h3><svg><use href="{% if document.key == 'profile' or document.key == 'vehicle' or document.key == 'identification' %}#i-camera{% else %}#i-file{% endif %}"/></svg> {{ document.label }}</h3>{% if document.value %}<button type="button" class="link-button" data-document-preview data-title="{{ document.label }}" data-file-name="{{ document.value|file_name }}" data-preview-url="{% url 'panel:document_access' profile.id document.key 'view' %}" data-download-url="{% url 'panel:document_access' profile.id document.key 'download' %}" data-preview-pdf="{{ document.value|is_pdf|yesno:'true,false' }}">Ampliar</button>{% endif %}</header>
-                <div class="document-file {% if not document.value %}missing{% endif %}"><svg><use href="{% if document.value %}#i-file{% else %}#i-x{% endif %}"/></svg><strong>{{ document.value|file_name }}</strong><span>{% if document.value %}Archivo cargado por el usuario{% else %}No se ha cargado este documento{% endif %}</span>{% if document.value %}<button type="button" class="preview-link" data-document-preview data-title="{{ document.label }}" data-file-name="{{ document.value|file_name }}" data-preview-url="{% url 'panel:document_access' profile.id document.key 'view' %}" data-download-url="{% url 'panel:document_access' profile.id document.key 'download' %}" data-preview-pdf="{{ document.value|is_pdf|yesno:'true,false' }}"><svg><use href="#i-eye"/></svg> Vista previa</button>{% endif %}</div>
-            </section>
+            {% include 'panel/_document_preview_card.html' with profile=profile document=document card_class='soft-card' %}
             {% endfor %}
             <section class="card admin-verification-actions"><h3>Acciones del administrador</h3><form method="post" action="{% url 'panel:verification_update' profile.id 'approve' %}">{% csrf_token %}<button class="btn btn-success btn-block" type="submit"><svg><use href="#i-check"/></svg> Verificación aceptada</button></form><form method="post" action="{% url 'panel:verification_update' profile.id 'reject' %}" class="reject-form">{% csrf_token %}<input class="form-control compact-input" name="reason" maxlength="250" placeholder="Motivo obligatorio del rechazo"><button class="btn btn-danger btn-block" type="submit"><svg><use href="#i-x"/></svg> Rechazar verificación</button></form><p>Al aprobar, el perfil aparecerá como verificado en la aplicación móvil.</p></section>
         </div>

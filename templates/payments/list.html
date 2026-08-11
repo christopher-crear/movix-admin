@@ -1,0 +1,93 @@
+{% extends 'base.html' %}{% load movix_tags %}
+{% block title %}Pagos de transportistas{% endblock %}
+{% block content %}
+<main class="payments-page payments-layout-v12">
+    <header class="page-heading payments-heading">
+        <div>
+            <span class="eyebrow">CONTROL DE MENSUALIDADES</span>
+            <h1>Pagos de transportistas</h1>
+            <p>Revisa comprobantes, registra pagos físicos, emite facturas y administra el acceso.</p>
+        </div>
+        <div class="heading-actions">
+            <a class="btn btn-secondary" href="{% url 'panel:admin_driver_messages' %}"><svg><use href="#i-mail"/></svg>Enviar mensaje</a>
+            <a class="btn btn-primary" href="{% url 'panel:payment_bank_accounts' %}"><svg><use href="#dp-money"/></svg>Administrar bancos</a>
+        </div>
+    </header>
+
+    <section class="payment-summary-grid" aria-label="Resumen de mensualidades">
+        <a class="payment-summary-card summary-pending" href="?period={{ period_value }}&bank={{ bank_filter }}&status=pending&q={{ query|urlencode }}">
+            <span class="summary-icon"><svg><use href="#i-clock"/></svg></span>
+            <span><small>Requieren revisión</small><strong>{{ counts.pending }}</strong><em>Pendientes</em></span>
+        </a>
+        <a class="payment-summary-card summary-approved" href="?period={{ period_value }}&bank={{ bank_filter }}&status=approved&q={{ query|urlencode }}">
+            <span class="summary-icon"><svg><use href="#i-check"/></svg></span>
+            <span><small>Mensualidades validadas</small><strong>{{ counts.approved }}</strong><em>Aprobados</em></span>
+        </a>
+        <a class="payment-summary-card summary-unpaid" href="?period={{ period_value }}&bank={{ bank_filter }}&status=unpaid&q={{ query|urlencode }}">
+            <span class="summary-icon"><svg><use href="#i-inbox"/></svg></span>
+            <span><small>Sin comprobante registrado</small><strong>{{ counts.unpaid }}</strong><em>Sin pago</em></span>
+        </a>
+        <a class="payment-summary-card summary-rejected" href="?period={{ period_value }}&bank={{ bank_filter }}&status=rejected&q={{ query|urlencode }}">
+            <span class="summary-icon"><svg><use href="#i-x"/></svg></span>
+            <span><small>Comprobantes observados</small><strong>{{ counts.rejected }}</strong><em>Rechazados</em></span>
+        </a>
+    </section>
+
+    <section class="card payment-workspace">
+        <header class="payment-workspace-heading">
+            <div>
+                <h2>Control del mes</h2>
+                <p>Busca un transportista o combina el mes, banco y estado.</p>
+            </div>
+            <span class="payment-period-badge">{{ period|date:'F Y' }}</span>
+        </header>
+
+        <form class="payment-filter-toolbar" method="get" data-auto-search data-min-length="2">
+            <label class="payment-search-control">
+                <span>Buscar transportista</span>
+                <span class="search-input-shell"><svg><use href="#i-search"/></svg><input name="q" value="{{ query }}" placeholder="Nombre, correo o cédula..."></span>
+            </label>
+            <label class="toolbar-select"><span>Mes</span><input type="month" name="period" value="{{ period_value }}"></label>
+            <label class="toolbar-select"><span>Banco o forma</span><select name="bank"><option value="all">Todos</option>{% for bank in banks %}<option value="{{ bank.code }}" {% if bank_filter == bank.code %}selected{% endif %}>{{ bank.name }}</option>{% endfor %}<option value="physical" {% if bank_filter == 'physical' %}selected{% endif %}>Pago físico</option></select></label>
+            <input type="hidden" name="status" value="{{ status }}">
+            <button class="btn btn-primary payment-filter-submit" type="submit"><svg><use href="#i-search"/></svg>Aplicar</button>
+        </form>
+
+        <nav class="payment-status-tabs" aria-label="Filtrar por estado">
+            <a class="{% if status == 'all' %}active{% endif %}" href="?period={{ period_value }}&bank={{ bank_filter }}&status=all&q={{ query|urlencode }}">Todos</a>
+            <a class="{% if status == 'pending' %}active{% endif %}" href="?period={{ period_value }}&bank={{ bank_filter }}&status=pending&q={{ query|urlencode }}">Pendientes</a>
+            <a class="{% if status == 'approved' %}active{% endif %}" href="?period={{ period_value }}&bank={{ bank_filter }}&status=approved&q={{ query|urlencode }}">Pagados</a>
+            <a class="{% if status == 'rejected' %}active{% endif %}" href="?period={{ period_value }}&bank={{ bank_filter }}&status=rejected&q={{ query|urlencode }}">Rechazados</a>
+            <a class="{% if status == 'unpaid' %}active{% endif %}" href="?period={{ period_value }}&bank={{ bank_filter }}&status=unpaid&q={{ query|urlencode }}">Sin pago</a>
+        </nav>
+
+        <div class="payment-table-shell">
+            <header class="table-section-head"><div><h3>Transportistas</h3><p>{{ page.paginator.count }} resultado{{ page.paginator.count|pluralize }}</p></div><span>Mostrando {{ page.start_index }}–{{ page.end_index }}</span></header>
+            <div class="table-responsive payment-admin-table">
+                <table>
+                    <thead><tr><th>Transportista</th><th>Mensualidad</th><th>Banco / forma</th><th>Estado</th><th>Cuenta</th><th>Acciones</th></tr></thead>
+                    <tbody>
+                    {% for row in page %}
+                        <tr>
+                            <td><div class="table-person">{% if row.avatar_url %}<span class="avatar"><img src="{{ row.avatar_url }}" alt="Foto de {{ row.driver.full_name }}"></span>{% else %}<span class="avatar">{{ row.driver.initials }}</span>{% endif %}<span><strong>{{ row.driver.full_name }}</strong><small>{{ row.driver.email }}</small></span></div></td>
+                            <td><strong class="payment-month-cell">{{ period|date:'F Y' }}</strong>{% if row.payment and row.payment.amount %}<small class="table-subline">USD {{ row.payment.amount|floatformat:2 }}</small>{% endif %}</td>
+                            <td>{% if row.payment %}<strong>{{ row.payment.bank_label }}</strong><small class="table-subline">{{ row.payment.method_label }}</small>{% else %}<span class="table-muted">Sin información</span>{% endif %}</td>
+                            <td><span class="pill payment-pill status-{{ row.status }}">{% if row.payment %}{{ row.payment.status_label }}{% else %}Sin registro{% endif %}</span></td>
+                            <td><span class="pill {% if row.driver.is_active %}pill-green{% else %}pill-red{% endif %}">{{ row.driver.is_active|yesno:'Activa,Bloqueada' }}</span>{% if row.driver.blocked_reason %}<small class="table-subline" title="{{ row.driver.blocked_reason }}">{{ row.driver.blocked_reason|truncatechars:32 }}</small>{% endif %}</td>
+                            <td>
+                                <div class="table-actions payment-row-actions">
+                                    {% if row.payment %}<a class="btn btn-sm btn-secondary" href="{% url 'panel:monthly_payment_detail' row.payment.id %}"><svg><use href="#i-eye"/></svg>Revisar</a>
+                                    {% else %}<details class="block-popover physical-payment-popover"><summary class="btn btn-sm btn-secondary">Pago físico</summary><form method="post" action="{% url 'panel:monthly_payment_physical' row.driver.id %}">{% csrf_token %}<label>Valor recibido<input class="form-control" type="number" name="amount" min="0.01" step="0.01" required placeholder="Ej. 10.00"></label><button class="btn btn-primary btn-sm">Registrar pago</button></form></details>{% endif %}
+                                    <details class="block-popover"><summary class="btn btn-sm {% if row.driver.is_active %}btn-danger{% else %}btn-secondary{% endif %}">{% if row.driver.is_active %}Bloquear{% else %}Habilitar{% endif %}</summary>{% if row.driver.is_active %}<form method="post" action="{% url 'panel:driver_payment_block' row.driver.id 'block' %}">{% csrf_token %}<label>Motivo<textarea name="reason" maxlength="500" required placeholder="Motivo que recibirá el transportista"></textarea></label><button class="btn btn-danger btn-sm">Confirmar bloqueo</button></form>{% else %}<form method="post" action="{% url 'panel:driver_payment_block' row.driver.id 'unblock' %}">{% csrf_token %}<p>La cuenta volverá a tener acceso.</p><button class="btn btn-primary btn-sm">Habilitar cuenta</button></form>{% endif %}</details>
+                                </div>
+                            </td>
+                        </tr>
+                    {% empty %}<tr><td colspan="6"><div class="empty-state"><svg><use href="#i-search"/></svg><strong>Sin resultados</strong><span>Prueba con otro nombre, banco, mes o estado.</span></div></td></tr>{% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% if page.paginator.num_pages > 1 %}<nav class="pagination"><span>Página {{ page.number }} de {{ page.paginator.num_pages }}</span><div>{% if page.has_previous %}<a class="btn btn-sm btn-secondary" href="?q={{ query|urlencode }}&status={{ status }}&bank={{ bank_filter }}&period={{ period_value }}&page={{ page.previous_page_number }}">Anterior</a>{% endif %}{% if page.has_next %}<a class="btn btn-sm btn-primary" href="?q={{ query|urlencode }}&status={{ status }}&bank={{ bank_filter }}&period={{ period_value }}&page={{ page.next_page_number }}">Siguiente</a>{% endif %}</div></nav>{% endif %}
+        </div>
+    </section>
+</main>
+{% endblock %}

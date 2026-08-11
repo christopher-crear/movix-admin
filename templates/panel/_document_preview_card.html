@@ -1,0 +1,46 @@
+{% load movix_tags %}
+<section class="{{ card_class|default:'soft-card' }} document-card asset-preview-card">
+    <header class="asset-preview-header">
+        <h3><svg><use href="{% if document.key == 'profile' or document.key == 'vehicle' or document.key == 'identification' %}#i-camera{% else %}#i-file{% endif %}"/></svg> {{ document.label }}</h3>
+        {% if document.value %}
+        <button type="button" class="asset-preview-expand" data-document-preview
+                data-title="{{ document.label }}" data-file-name="{{ document.value|file_name }}"
+                data-preview-url="{% url 'panel:document_access' profile.id document.key 'view' %}"
+                data-download-url="{% url 'panel:document_access' profile.id document.key 'download' %}"
+                data-preview-pdf="{{ document.value|is_pdf|yesno:'true,false' }}">
+            <svg><use href="#i-eye"/></svg> Ampliar
+        </button>
+        {% endif %}
+    </header>
+
+    {% if document.value %}
+    <button type="button" class="asset-preview-frame {% if document.value|is_pdf %}is-pdf{% endif %}"
+            data-document-preview data-title="{{ document.label }}"
+            data-file-name="{{ document.value|file_name }}"
+            data-preview-url="{% url 'panel:document_access' profile.id document.key 'view' %}"
+            data-download-url="{% url 'panel:document_access' profile.id document.key 'download' %}"
+            data-preview-pdf="{{ document.value|is_pdf|yesno:'true,false' }}">
+        {% if document.value|is_pdf %}
+        <span class="asset-pdf-thumbnail">
+            <iframe src="{% url 'panel:document_access' profile.id document.key 'view' %}#page=1&zoom=page-fit&toolbar=0&navpanes=0&scrollbar=0"
+                    title="Primera página de {{ document.label }}" loading="lazy" tabindex="-1"></iframe>
+            <span class="asset-pdf-badge"><svg><use href="#i-file"/></svg> PDF</span>
+        </span>
+        {% else %}
+        <span class="asset-preview-canvas">
+            <img data-media-thumb src="{% url 'panel:document_access' profile.id document.key 'view' %}"
+                 alt="Miniatura de {{ document.label }}" loading="lazy">
+            <span class="asset-preview-error"><svg><use href="#i-file"/></svg><b>No se pudo cargar la miniatura</b><small>Usa “Ampliar” para volver a intentarlo</small></span>
+        </span>
+        {% endif %}
+    </button>
+    <strong class="asset-preview-name" title="{{ document.value|file_name }}">{{ document.value|file_name }}</strong>
+    <a class="asset-preview-download" href="{% url 'panel:document_access' profile.id document.key 'download' %}">
+        <svg><use href="#i-download"/></svg> Descargar original
+    </a>
+    {% else %}
+    <div class="asset-preview-frame is-empty">
+        <span><svg><use href="#i-file"/></svg><strong>Sin archivo</strong><small>No se ha cargado este documento</small></span>
+    </div>
+    {% endif %}
+</section>

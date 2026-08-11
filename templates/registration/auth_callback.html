@@ -1,0 +1,18 @@
+{% load static %}
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Validando acceso · MOVIX</title><link rel="stylesheet" href="{% static 'css/driver_portal.css' %}?v=20260810-70"></head>
+<body class="auth-callback-body"><main class="auth-callback-card"><img src="{% static 'img/ICONO_APP.png' %}" alt="MOVIX"><span class="auth-spinner"></span><h1>Validando tu cuenta</h1><p id="authStatus">Estamos comprobando tu identidad y rol en MOVIX.</p><form id="authSessionForm" method="post" action="{% url 'panel:auth_session' %}">{% csrf_token %}<input type="hidden" name="access_token" id="accessToken"><input type="hidden" name="refresh_token" id="refreshToken"></form><a id="authReturn" href="{% url 'login' %}" hidden>Volver al inicio de sesión</a></main>
+<script>
+(() => {
+  const values = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  const access = values.get('access_token');
+  const error = values.get('error_description') || values.get('error');
+  if (access) {
+    document.getElementById('accessToken').value = access;
+    document.getElementById('refreshToken').value = values.get('refresh_token') || '';
+    document.getElementById('authSessionForm').submit();
+    return;
+  }
+  document.getElementById('authStatus').textContent = error || 'Google no devolvió una sesión. Verifica la URL de redirección configurada en Supabase.';
+  document.getElementById('authReturn').hidden = false;
+})();
+</script></body></html>

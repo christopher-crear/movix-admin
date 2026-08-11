@@ -1,15 +1,113 @@
 {% extends 'base.html' %}
 {% block title %}Mi perfil{% endblock %}
 {% block content %}
-<section class="profile-cover" {% if admin_profile.cover_url %}style="background-image:linear-gradient(110deg,rgba(27,93,255,.85),rgba(0,196,255,.75)),url('{{ admin_profile.cover_url }}')"{% endif %}><span class="avatar avatar-admin">{% if admin_profile.avatar_url %}<img src="{{ admin_profile.avatar_url }}" alt="Foto de perfil">{% else %}{{ request.user.first_name|default:request.user.username|slice:':1' }}{{ request.user.last_name|slice:':1' }}{% endif %}</span><div><h1>{{ request.user.get_full_name|default:request.user.username }}</h1><p>Administrador MOVIX</p></div></section>
-<div class="admin-profile-grid">
-    <div>
-        <section class="card form-card"><h2>Información personal</h2><form method="post" enctype="multipart/form-data" class="form-grid">{% csrf_token %}<input type="hidden" name="action" value="profile">{{ profile_form.non_field_errors }}{% for field in profile_form %}<div class="field">{{ field.label_tag }}{{ field }}{{ field.errors }}</div>{% endfor %}<button class="btn btn-primary" type="submit">Guardar perfil</button></form></section>
-        <section class="card form-card"><h2>Cambiar contraseña</h2><form method="post" class="stack-form">{% csrf_token %}<input type="hidden" name="action" value="password">{{ password_form.non_field_errors }}{% for field in password_form %}<div class="field">{{ field.label_tag }}{{ field }}{{ field.errors }}{% if field.help_text %}<small>{{ field.help_text|safe }}</small>{% endif %}</div>{% endfor %}<button class="btn btn-secondary" type="submit">Actualizar contraseña</button></form></section>
+<div class="admin-profile-page">
+    <section class="admin-profile-hero {% if admin_profile.cover_url %}has-cover{% endif %}">
+        {% if admin_profile.cover_url %}
+        <img class="admin-profile-cover-image profile-cover-image" src="{{ admin_profile.cover_url }}" alt="Portada del perfil">
+        {% endif %}
+        <div class="admin-profile-cover-shade"></div>
+        {% if editing %}
+        <label class="admin-cover-button" for="id_profile-cover"><svg><use href="#i-camera"/></svg> Cambiar portada</label>
+        {% else %}
+        <a class="admin-cover-button" href="?editar=1#editar-perfil"><svg><use href="#i-camera"/></svg> Cambiar portada</a>
+        {% endif %}
+        <span class="admin-profile-avatar">
+            {% if admin_profile.avatar_url %}
+            <img src="{{ admin_profile.avatar_url }}" alt="Foto de perfil">
+            {% else %}
+            {{ request.user.first_name|default:request.user.username|slice:':1' }}{{ request.user.last_name|slice:':1' }}
+            {% endif %}
+        </span>
+    </section>
+
+    <div class="admin-profile-toolbar">
+        {% if not editing %}
+        <a class="btn btn-secondary admin-edit-profile-button" href="?editar=1#editar-perfil"><svg><use href="#i-edit"/></svg> Editar perfil</a>
+        {% else %}
+        <a class="btn btn-secondary" href="{% url 'panel:admin_profile' %}"><svg><use href="#i-x"/></svg> Cancelar edición</a>
+        {% endif %}
     </div>
-    <aside>
-        <section class="card activity-summary"><h2>Actividad</h2><dl><div><dt>Usuarios registrados</dt><dd>{{ stats.users }}</dd></div><div><dt>Transportistas registrados</dt><dd>{{ stats.drivers }}</dd></div><div><dt>Verificaciones pendientes</dt><dd>{{ stats.pending }}</dd></div><div><dt>Miembro desde</dt><dd>{{ request.user.date_joined|date:'M Y' }}</dd></div></dl></section>
-        <section class="card danger-zone"><h2>Zona de peligro</h2><p>La eliminación de la cuenta administrativa es irreversible. El sistema impedirá eliminar al único administrador.</p><form method="post" action="{% url 'panel:admin_account_delete' %}" data-confirm="Eliminar mi cuenta|Perderás el acceso administrativo de forma permanente.">{% csrf_token %}<input class="form-control" type="password" name="password" placeholder="Confirma tu contraseña" required><button class="btn btn-danger btn-block" type="submit"><svg><use href="#i-trash"/></svg> Eliminar cuenta</button></form></section>
-    </aside>
+
+    <div class="admin-profile-layout">
+        <div class="admin-profile-main">
+            {% if editing %}
+            <section class="card admin-profile-card" id="editar-perfil">
+                <header class="admin-card-heading">
+                    <div><span class="admin-card-icon"><svg><use href="#i-edit"/></svg></span><div><h2>Editar perfil</h2><p>Actualiza tus datos y las imágenes de tu cuenta.</p></div></div>
+                </header>
+                <form method="post" enctype="multipart/form-data" class="form-grid admin-profile-form">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="profile">
+                    {{ profile_form.non_field_errors }}
+                    {% for field in profile_form %}
+                        {% if field.name == 'avatar' or field.name == 'cover' %}
+                        <div class="field admin-media-upload" data-local-upload id="profile-{{ field.name }}-field">
+                            {{ field.label_tag }}
+                            <span class="local-file-preview" aria-hidden="true"><img alt="Previsualización de {{ field.label }}"><span class="local-pdf-preview"><iframe class="local-pdf-frame" title="Previsualización del archivo seleccionado" tabindex="-1"></iframe><b>PDF</b></span></span>
+                            {{ field }}
+                            <small data-file-name>Selecciona una imagen para previsualizarla</small>
+                            {{ field.errors }}
+                        </div>
+                        {% else %}
+                        <div class="field">{{ field.label_tag }}{{ field }}{{ field.errors }}</div>
+                        {% endif %}
+                    {% endfor %}
+                    <div class="admin-profile-form-actions full-span">
+                        <a class="btn btn-secondary" href="{% url 'panel:admin_profile' %}">Cancelar</a>
+                        <button class="btn btn-primary" type="submit">Guardar cambios</button>
+                    </div>
+                </form>
+            </section>
+            {% else %}
+            <section class="card admin-profile-card admin-personal-card" id="informacion-personal">
+                <header class="admin-card-heading"><div><span class="admin-card-icon"><svg><use href="#i-user"/></svg></span><div><h2>Información personal</h2></div></div></header>
+                <div class="admin-profile-identity">
+                    <h3>{{ request.user.get_full_name|default:request.user.username }}</h3>
+                    <strong>Administrador</strong>
+                </div>
+                <ul class="admin-contact-list">
+                    <li><span><svg><use href="#i-mail"/></svg></span><a href="mailto:{{ request.user.email }}">{{ request.user.email|default:'Sin correo registrado' }}</a></li>
+                    <li><span><svg><use href="#i-phone"/></svg></span>{{ admin_profile.phone|default:'Sin teléfono registrado' }}</li>
+                    <li><span><svg><use href="#i-map-pin"/></svg></span>{{ admin_profile.city|default:'Sin ciudad registrada' }}</li>
+                </ul>
+            </section>
+            {% endif %}
+
+            <section class="card admin-profile-card admin-password-card">
+                <header class="admin-card-heading"><div><span class="admin-card-icon"><svg><use href="#i-lock"/></svg></span><div><h2>Cambiar contraseña</h2><p>Utiliza una contraseña segura de al menos 8 caracteres.</p></div></div></header>
+                <form method="post" class="stack-form admin-password-form">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="password">
+                    {{ password_form.non_field_errors }}
+                    {% for field in password_form %}
+                    <div class="field">{{ field.label_tag }}{{ field }}{{ field.errors }}{% if field.help_text %}<small>{{ field.help_text|safe }}</small>{% endif %}</div>
+                    {% endfor %}
+                    <div><button class="btn btn-secondary" type="submit"><svg><use href="#i-lock"/></svg> Actualizar contraseña</button></div>
+                </form>
+            </section>
+        </div>
+
+        <aside class="admin-profile-side">
+            <section class="card admin-profile-card admin-activity-card">
+                <header class="admin-card-heading"><div><span class="admin-card-icon"><svg><use href="#i-bolt"/></svg></span><div><h2>Actividad</h2></div></div></header>
+                <dl>
+                    <div><dt>Usuarios registrados</dt><dd>{{ stats.users }}</dd></div>
+                    <div><dt>Transportistas registrados</dt><dd>{{ stats.drivers }}</dd></div>
+                    <div><dt>Verificaciones pendientes</dt><dd>{{ stats.pending }}</dd></div>
+                    <div><dt>Miembro desde</dt><dd>{{ request.user.date_joined|date:'M Y' }}</dd></div>
+                </dl>
+            </section>
+            <section class="card admin-profile-card admin-danger-card">
+                <header class="admin-card-heading"><div><span class="admin-card-icon"><svg><use href="#i-trash"/></svg></span><div><h2>Zona de peligro</h2></div></div></header>
+                <p>Eliminar la cuenta es irreversible. El sistema impedirá eliminar al único administrador activo.</p>
+                <form method="post" action="{% url 'panel:admin_account_delete' %}" data-confirm="Eliminar mi cuenta|Perderás el acceso administrativo de forma permanente.">
+                    {% csrf_token %}
+                    <input class="form-control" type="password" name="password" placeholder="Confirma tu contraseña" required>
+                    <button class="btn btn-danger btn-block" type="submit"><svg><use href="#i-trash"/></svg> Eliminar cuenta</button>
+                </form>
+            </section>
+        </aside>
+    </div>
 </div>
 {% endblock %}

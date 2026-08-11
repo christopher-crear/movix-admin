@@ -1,4 +1,4 @@
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 from django import template
 from django.conf import settings
@@ -33,8 +33,12 @@ def profile_photo_url(profile):
     value = str(getattr(profile, "profile_photo_url", "") or getattr(profile, "avatar_url", "") or "").strip()
     if not value:
         return ""
-    if value.startswith(("https://", "http://")):
-        return value
+    if value.startswith("https://"):
+        parsed = urlparse(value)
+        if parsed.hostname == "res.cloudinary.com" or "/storage/v1/object/public/" in parsed.path:
+            return value
+        # Buckets privados y enlaces sin token deben pasar por document_access.
+        return ""
     if value.startswith("storage://"):
         bucket_path = value.removeprefix("storage://")
         if bucket_path.startswith(f"{settings.SUPABASE_PUBLIC_BUCKET}/"):

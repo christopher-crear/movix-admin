@@ -14,3 +14,15 @@ def admin_required(view_func):
         return view_func(request, *args, **kwargs)
 
     return wrapped
+
+
+def driver_portal_required(view_func):
+    """Exige una sesión de transportista validada previamente por Supabase."""
+
+    @wraps(view_func)
+    def wrapped(request, *args, **kwargs):
+        if not request.session.get("portal_profile_id"):
+            return redirect_to_login(request.get_full_path())
+        return view_func(request, *args, **kwargs)
+
+    return wrapped

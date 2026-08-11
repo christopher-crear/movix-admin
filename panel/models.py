@@ -103,6 +103,19 @@ class Profile(models.Model):
             return "No disponible"
         return "Activo"
 
+    @property
+    def vehicle_type_label(self):
+        value = str(self.vehicle_type or "").strip()
+        return {
+            "camioneta": "Camioneta",
+            "camion_pequeno": "Camión pequeño",
+            "camion pequeño": "Camión pequeño",
+            "camión pequeño": "Camión pequeño",
+            "camion_mediano": "Camión mediano",
+            "camion mediano": "Camión mediano",
+            "camión mediano": "Camión mediano",
+        }.get(value.lower(), value or "Vehículo sin especificar")
+
     def __str__(self):
         return self.full_name
 
@@ -140,6 +153,40 @@ class Ride(models.Model):
         managed = False
         db_table = "rides"
 
+    @property
+    def effective_price(self):
+        return self.driver_price if self.driver_price is not None else self.price
+
+    @property
+    def status_label(self):
+        value = (self.status or "").lower()
+        labels = {
+            "solicitada": "Solicitada",
+            "aceptada": "Aceptada",
+            "accepted": "Aceptada",
+            "en_camino": "En camino",
+            "en curso": "En curso",
+            "in_progress": "En curso",
+            "completada": "Completada",
+            "completado": "Completada",
+            "completed": "Completada",
+            "finalizada": "Completada",
+            "finalizado": "Completada",
+            "cancelada": "Cancelada",
+            "cancelado": "Cancelada",
+            "cancelled": "Cancelada",
+            "canceled": "Cancelada",
+        }
+        return labels.get(value, (self.status or "Sin estado").replace("_", " ").title())
+
+    @property
+    def is_completed(self):
+        return (self.status or "").lower() in {"completada", "completado", "completed", "finalizada", "finalizado"}
+
+    @property
+    def is_cancelled(self):
+        return (self.status or "").lower() in {"cancelada", "cancelado", "cancelled", "canceled"}
+
 
 class DriverReview(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4)
@@ -170,6 +217,207 @@ class Notification(models.Model):
         managed = False
         db_table = "notifications"
         ordering = ["-created_at"]
+
+
+class DriverMonthlyPayment(models.Model):
+    """Mensualidades declaradas por los transportistas en Supabase."""
+
+    STATUS_PENDING = "pending"
+    STATUS_APPROVED = "approved"
+    STATUS_REJECTED = "rejected"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pendiente"),
+        (STATUS_APPROVED, "Aprobado"),
+        (STATUS_REJECTED, "Rechazado"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    driver = models.ForeignKey(
+        Profile,
+        models.DO_NOTHING,
+        db_column="driver_id",
+        related_name="monthly_payments",
+    )
+    period = models.DateField()
+    amount = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
+    bank = models.TextField()
+    payment_method = models.TextField(default="transfer")
+    receipt_url = models.TextField(blank=True, null=True)
+    status = models.TextField(default=STATUS_PENDING)
+    admin_notes = models.TextField(blank=True, null=True)
+    reviewed_by = models.TextField(blank=True, null=True)
+    reviewed_at = models.DateTimeField(blank=True, null=True)
+    created_at = models.DateTimeField(blank=True, null=True)
+    updated_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        managed = False
+        db_table = "driver_monthly_payments"
+        ordering = ["-period", "-created_at"]
+
+    @property
+    def status_label(self):
+        return dict(self.STATUS_CHOICES).get(self.status, self.status)
+
+    @property
+    def method_label(self):
+        return {"transfer": "Transferencia", "deposit": "Depósito", "cash": "Efectivo"}.get(
+            self.payment_method, self.payment_method
+        )
+
+    @property
+    def bank_label(self):
+        return {
+            "banco_loja": "Banco de Loja",
+            "banco_pichincha": "Banco Pichincha",
+            "coopego": "Banco Coopego",
+            "jep": "Cooperativa JEP",
+            "physical": "Pago físico",
+        }.get(self.bank, self.bank)
+
+
+class PaymentBankAccount(models.Model):
+    """Cuentas de cobro configuradas por el administrador en Supabase."""
+
+    BANK_CHOICES = [
+        ("banco_loja", "Banco de Loja"),
+        ("banco_pichincha", "Banco Pichincha"),
+        ("coopego", "Banco Coopego"),
+        ("jep", "Cooperativa JEP"),
+    ]
+    ACCOUNT_TYPE_CHOICES = [
+        ("savings", "Ahorros"),
+        ("checking", "Corriente"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    code = models.TextField(unique=True, choices=BANK_CHOICES)
+    account_holder = models.TextField()
+    account_number = models.TextField()
+    account_type = models.TextField(default="savings", choices=ACCOUNT_TYPE_CHOICES)
+    identification_number = models.TextField(blank=True, null=True)
+    instructions = models.TextField(blank=True, null=True)
+    logo_url = models.TextField(blank=True, null=True)
+    qr_url = models.TextField(blank=True, null=True)
+    is_active = models.BooleanField(default=True)
+    sort_order = models.IntegerField(default=0)
+    created_at = models.DateTimeField(blank=True, null=True)
+    updated_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        managed = False
+        db_table = "payment_bank_accounts"
+        ordering = ["sort_order", "code"]
+
+    @property
+    def name(self):
+        return dict(self.BANK_CHOICES).get(self.code, self.code)
+
+    @property
+    def account_type_label(self):
+        return dict(self.ACCOUNT_TYPE_CHOICES).get(self.account_type, self.account_type)
+
+    @property
+    def default_logo(self):
+        return {
+            "banco_loja": "img/banks/banco-loja.svg",
+            "banco_pichincha": "img/banks/banco-pichincha.svg",
+            "coopego": "img/banks/coopego.svg",
+            "jep": "img/banks/jep.svg",
+        }.get(self.code, "img/logo-mark.svg")
+
+    def __str__(self):
+        return self.name
+
+
+class DriverInvoice(models.Model):
+    """Factura/recibo generado al aprobar una mensualidad."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    invoice_number = models.TextField(unique=True)
+    payment = models.OneToOneField(
+        DriverMonthlyPayment,
+        models.DO_NOTHING,
+        db_column="payment_id",
+        related_name="invoice",
+    )
+    driver = models.ForeignKey(
+        Profile,
+        models.DO_NOTHING,
+        db_column="driver_id",
+        related_name="monthly_invoices",
+    )
+    customer_name = models.TextField()
+    customer_email = models.TextField(blank=True, null=True)
+    customer_identification = models.TextField(blank=True, null=True)
+    period = models.DateField()
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    bank = models.TextField()
+    payment_method = models.TextField()
+    pdf_url = models.TextField(blank=True, null=True)
+    status = models.TextField(default="issued")
+    issued_at = models.DateTimeField(blank=True, null=True)
+    emailed_at = models.DateTimeField(blank=True, null=True)
+    created_by = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(blank=True, null=True)
+    updated_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        managed = False
+        db_table = "driver_invoices"
+        ordering = ["-issued_at", "-created_at"]
+
+    def __str__(self):
+        return self.invoice_number
+
+
+class DriverInboxMessage(models.Model):
+    """Buzón persistente del transportista, visible también para la app móvil."""
+
+    TYPE_CHOICES = [
+        ("invoice", "Factura"),
+        ("meeting", "Reunión"),
+        ("payment", "Pago"),
+        ("account", "Cuenta"),
+        ("general", "General"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    driver = models.ForeignKey(
+        Profile,
+        models.DO_NOTHING,
+        db_column="driver_id",
+        related_name="inbox_messages",
+    )
+    message_type = models.TextField(default="general", choices=TYPE_CHOICES)
+    title = models.TextField()
+    body = models.TextField()
+    invoice = models.ForeignKey(
+        DriverInvoice,
+        models.DO_NOTHING,
+        db_column="invoice_id",
+        related_name="messages",
+        blank=True,
+        null=True,
+    )
+    details = models.JSONField(default=dict)
+    is_read = models.BooleanField(default=False)
+    read_at = models.DateTimeField(blank=True, null=True)
+    emailed_at = models.DateTimeField(blank=True, null=True)
+    created_by = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        managed = False
+        db_table = "driver_inbox_messages"
+        ordering = ["-created_at"]
+
+    @property
+    def type_label(self):
+        return dict(self.TYPE_CHOICES).get(self.message_type, self.message_type)
+
+    def __str__(self):
+        return f"{self.driver.full_name} · {self.title}"
 
 
 class Advertisement(models.Model):

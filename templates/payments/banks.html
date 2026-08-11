@@ -1,0 +1,55 @@
+{% extends 'base.html' %}{% load static movix_tags %}
+{% block title %}Bancos y cuentas{% endblock %}
+{% block content %}
+<main class="banks-page bank-admin-v12">
+    <header class="page-heading">
+        <div><span class="eyebrow">CONFIGURACIÓN DE COBROS</span><h1>Bancos y cuentas</h1><p>Publica los datos que verán los transportistas antes de enviar su mensualidad.</p></div>
+        <a class="btn btn-secondary" href="{% url 'panel:monthly_payment_list' %}"><svg><use href="#i-arrow"/></svg>Volver a pagos</a>
+    </header>
+
+    <div class="bank-admin-layout">
+        <section class="card bank-admin-form-card">
+            <header class="bank-form-heading">
+                <span class="bank-form-icon"><svg><use href="#dp-money"/></svg></span>
+                <div><span class="eyebrow">DATOS DE TRANSFERENCIA</span><h2>{% if editing_bank %}Editar {{ editing_bank.name }}{% else %}Configurar un banco{% endif %}</h2><p>Los campos con asterisco son necesarios. El logo y el QR son opcionales.</p></div>
+            </header>
+            <form method="post" enctype="multipart/form-data" class="bank-settings-form">
+                {% csrf_token %}{% if editing_bank %}<input type="hidden" name="bank_id" value="{{ editing_bank.id }}">{% endif %}{{ form.non_field_errors }}
+                <label class="form-field field-full"><span>{{ form.code.label }} *</span>{{ form.code }}{{ form.code.errors }}</label>
+                <label class="form-field field-full"><span>{{ form.account_holder.label }} *</span>{{ form.account_holder }}{{ form.account_holder.errors }}</label>
+                <div class="bank-field-pair">
+                    <label class="form-field"><span>{{ form.account_number.label }} *</span>{{ form.account_number }}{{ form.account_number.errors }}</label>
+                    <label class="form-field"><span>{{ form.account_type.label }} *</span>{{ form.account_type }}{{ form.account_type.errors }}</label>
+                </div>
+                <div class="bank-field-pair">
+                    <label class="form-field"><span>{{ form.identification_number.label }} *</span>{{ form.identification_number }}{{ form.identification_number.errors }}</label>
+                    <label class="form-field"><span>{{ form.sort_order.label }}</span>{{ form.sort_order }}{{ form.sort_order.errors }}</label>
+                </div>
+                <label class="form-field field-full"><span>{{ form.instructions.label }}</span>{{ form.instructions }}<small>Ejemplo: “Incluye tu nombre y cédula en el concepto”.</small>{{ form.instructions.errors }}</label>
+                <label class="visibility-switch">{{ form.is_active }}<span><strong>Visible para transportistas</strong><small>Actívalo cuando los datos estén listos.</small></span></label>{{ form.is_active.errors }}
+                <div class="bank-file-pair">
+                    <label class="bank-file-field"><span class="bank-file-icon"><svg><use href="#i-upload"/></svg></span><span><strong>{{ form.logo_file.label }}</strong><small>PNG, JPG o WEBP</small></span>{{ form.logo_file }}{{ form.logo_file.errors }}</label>
+                    <label class="bank-file-field"><span class="bank-file-icon"><svg><use href="#i-upload"/></svg></span><span><strong>{{ form.qr_file.label }}</strong><small>Imagen nítida y cuadrada</small></span>{{ form.qr_file }}{{ form.qr_file.errors }}</label>
+                </div>
+                <footer class="bank-form-actions"><a class="btn btn-secondary" href="{% url 'panel:payment_bank_accounts' %}">Limpiar</a><button class="btn btn-primary" type="submit"><svg><use href="#i-check"/></svg>{% if editing_bank %}Guardar cambios{% else %}Guardar banco{% endif %}</button></footer>
+            </form>
+        </section>
+
+        <section class="bank-admin-directory">
+            <header class="directory-heading"><div><span class="eyebrow">DIRECTORIO PUBLICADO</span><h2>Cuentas registradas</h2><p>{{ accounts|length }} banco{{ accounts|length|pluralize }} configurado{{ accounts|length|pluralize }}</p></div><span class="directory-tip"><svg><use href="#i-eye"/></svg>Solo las cuentas visibles aparecen al transportista</span></header>
+            <div class="bank-admin-grid">
+            {% for account in accounts %}
+                <article class="bank-admin-card">
+                    <header><span class="bank-logo-frame"><img src="{% if account.logo_url %}{% url 'panel:payment_bank_asset' account.id 'logo' 'view' %}{% else %}{% static account.default_logo %}{% endif %}" alt="{{ account.name }}"></span><span class="pill {% if account.is_active %}pill-green{% else %}pill-red{% endif %}">{{ account.is_active|yesno:'Visible,Oculto' }}</span></header>
+                    <div class="bank-card-title"><h3>{{ account.name }}</h3><small>{{ account.account_type_label }}</small></div>
+                    <dl><div><dt>Titular</dt><dd>{{ account.account_holder|default:'Pendiente de configurar' }}</dd></div><div><dt>Número de cuenta</dt><dd>{{ account.account_number|default:'Pendiente' }}</dd></div><div><dt>Cédula / RUC</dt><dd>{{ account.identification_number|default:'No registrado' }}</dd></div></dl>
+                    {% if account.instructions %}<p class="bank-instructions">{{ account.instructions|truncatechars:120 }}</p>{% endif %}
+                    {% if account.qr_url %}<button class="bank-admin-qr" type="button" data-document-preview data-title="QR · {{ account.name }}" data-file-name="QR {{ account.name }}" data-preview-url="{% url 'panel:payment_bank_asset' account.id 'qr' 'view' %}" data-download-url="{% url 'panel:payment_bank_asset' account.id 'qr' 'download' %}" data-preview-pdf="false"><img src="{% url 'panel:payment_bank_asset' account.id 'qr' 'view' %}" alt="QR de {{ account.name }}"><span><strong>Código QR disponible</strong><small>Pulsa para ampliar</small></span></button>{% else %}<div class="bank-no-qr"><svg><use href="#i-inbox"/></svg><span>Sin código QR</span></div>{% endif %}
+                    <footer><a class="btn btn-sm btn-secondary" href="?editar={{ account.id }}"><svg><use href="#i-edit"/></svg>Editar datos</a><form method="post" action="{% url 'panel:payment_bank_toggle' account.id %}">{% csrf_token %}<button class="btn btn-sm {% if account.is_active %}btn-danger{% else %}btn-primary{% endif %}">{{ account.is_active|yesno:'Ocultar,Publicar' }}</button></form></footer>
+                </article>
+            {% empty %}<div class="empty-state card"><svg><use href="#i-inbox"/></svg><strong>Aún no existen cuentas</strong><span>Completa el formulario para publicar el primer banco.</span></div>{% endfor %}
+            </div>
+        </section>
+    </div>
+</main>
+{% endblock %}
