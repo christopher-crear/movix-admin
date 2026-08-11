@@ -156,7 +156,7 @@ EMAIL_TIMEOUT = int(os.getenv("EMAIL_TIMEOUT", "12"))
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER or "MOVIX <eraschristopher0@gmail.com>")
 
 # Datos públicos mostrados únicamente en la landing.
-MOVIX_SUPPORT_EMAIL = os.getenv("MOVIX_SUPPORT_EMAIL", "movix_soporte@gmail.com")
+MOVIX_SUPPORT_EMAIL = os.getenv("MOVIX_SUPPORT_EMAIL", "eraschristopher0@gmail.com")
 MOVIX_WHATSAPP_NUMBER = os.getenv("MOVIX_WHATSAPP_NUMBER", "593989414258")
 MOVIX_WHATSAPP_DISPLAY = os.getenv("MOVIX_WHATSAPP_DISPLAY", "098 941 4258")
 MOVIX_FACEBOOK_URL = os.getenv("MOVIX_FACEBOOK_URL", "https://www.facebook.com/")

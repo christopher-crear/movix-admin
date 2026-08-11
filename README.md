@@ -17,6 +17,10 @@ El sistema utiliza las tablas existentes de la app móvil (`profiles`, `rides`, 
 - Módulo **Solicitudes** para buscar, leer, responder por correo, cerrar y dar seguimiento a contactos.
 - Secciones de descarga, vehículos, testimonios, métodos de pago, preguntas frecuentes y redes de contacto.
 - Inicio de sesión unificado y enrutamiento seguro por rol.
+- Pantalla de acceso MOVIX responsive con ilustración propia, logo oficial de Google, enlace a términos y recuperación de contraseña.
+- Registro público de transportistas en `/registro-transportista/`, conectado con Supabase Auth, `profiles` y Storage.
+- Registro guiado con foto tipo carnet, foto del vehículo, cédula, licencia, matrícula y seguro obligatorios; el perfil queda pendiente de revisión.
+- Recuperación de contraseña por correo con enlace firmado de 30 minutos y formulario MOVIX para confirmar la nueva clave.
 - Administradores mediante cuenta Django con `is_staff=True`.
 - Transportistas mediante correo/contraseña de Supabase Auth o Google.
 - Portal privado del transportista con ganancias semanales y diarias, viajes, distancia y calificación.
@@ -128,7 +132,7 @@ porque los puertos SMTP están bloqueados.
 ```env
 EMAIL_PROVIDER=brevo
 BREVO_API_KEY=TU_API_KEY_PRIVADA
-BREVO_SENDER_EMAIL=movix_soporte@gmail.com
+BREVO_SENDER_EMAIL=eraschristopher0@gmail.com
 BREVO_SENDER_NAME=MOVIX
 ```
 
@@ -193,6 +197,17 @@ python manage.py runserver
 Abre `http://127.0.0.1:8000/` para ver la página pública y
 `http://127.0.0.1:8000/login/` para entrar. El rol autenticado decide si se abre
 el panel administrativo o `/transportista/`.
+
+Desde la landing y el login se puede abrir
+`http://127.0.0.1:8000/registro-transportista/`. El servidor crea primero la
+identidad en Supabase Auth, guarda los datos en `public.profiles`, carga las
+fotos/documentos en los buckets correspondientes y deja la verificación en
+estado `pending`. No se requiere una tabla adicional para este flujo.
+
+La opción **¿Olvidaste tu contraseña?** envía un enlace al correo registrado.
+El enlace dura 30 minutos y solo puede utilizarse una vez. Para cuentas de
+transportistas, Django cambia la clave mediante Supabase Auth con
+`SUPABASE_SERVICE_ROLE_KEY`; para administradores actualiza la cuenta Django.
 
 Los datos públicos de contacto se pueden cambiar en `.env` mediante
 `MOVIX_SUPPORT_EMAIL`, `MOVIX_WHATSAPP_NUMBER`, `MOVIX_WHATSAPP_DISPLAY` y

@@ -8,7 +8,7 @@ facturas por la API HTTPS de Brevo y mantiene SMTP como alternativa local.
 ```env
 EMAIL_PROVIDER=brevo
 BREVO_API_KEY=TU_API_KEY_PRIVADA
-BREVO_SENDER_EMAIL=movix_soporte@gmail.com
+BREVO_SENDER_EMAIL=eraschristopher0@gmail.com
 BREVO_SENDER_NAME=MOVIX
 ```
 

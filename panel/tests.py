@@ -4,6 +4,7 @@ from unittest.mock import Mock, patch
 
 from django.contrib.auth.models import User
 from django import forms
+from django.core import signing
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection
@@ -12,7 +13,15 @@ from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from .forms import DriverSelfProfileForm, ProfileCreateForm, ProfileForm, PublicContactForm
+from .forms import (
+    DriverSelfProfileForm,
+    PasswordRecoveryRequestForm,
+    PasswordResetConfirmForm,
+    ProfileCreateForm,
+    ProfileForm,
+    PublicContactForm,
+    PublicDriverRegistrationForm,
+)
 from .models import (
     Advertisement,
     AdminProfile,
@@ -72,7 +81,7 @@ class PublicPagesTests(SimpleTestCase):
         self.assertContains(response, reverse("login"))
         self.assertContains(response, "Portal transportista")
         self.assertNotContains(response, "Panel administrativo")
-        self.assertContains(response, "movix_soporte@gmail.com")
+        self.assertContains(response, "eraschristopher0@gmail.com")
         self.assertContains(response, "593989414258")
 
     def test_login_page_renders(self):
@@ -80,6 +89,24 @@ class PublicPagesTests(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Bienvenido a MOVIX")
         self.assertContains(response, "Continuar con Google")
+        self.assertContains(response, reverse("driver_registration"))
+        self.assertContains(response, reverse("password_recovery"))
+
+    def test_public_driver_registration_renders_document_guidance(self):
+        response = self.client.get(reverse("driver_registration"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Foto de perfil tipo carnet")
+        self.assertContains(response, "Cédula completa")
+        self.assertContains(response, "Matrícula vehicular")
+        self.assertContains(response, "términos y condiciones")
+
+    def test_password_recovery_and_terms_pages_are_public(self):
+        recovery = self.client.get(reverse("password_recovery"))
+        terms = self.client.get(reverse("terms_and_conditions"))
+        self.assertEqual(recovery.status_code, 200)
+        self.assertEqual(terms.status_code, 200)
+        self.assertContains(recovery, "Recupera tu contraseña")
+        self.assertContains(terms, "Documento de prueba")
 
     def test_anonymous_user_is_redirected(self):
         response = self.client.get(reverse("panel:dashboard"))
@@ -132,6 +159,22 @@ class BrevoEmailTests(SimpleTestCase):
 
 
 class FormTests(SimpleTestCase):
+    def test_public_driver_registration_requires_all_documents_and_terms(self):
+        form = PublicDriverRegistrationForm()
+        for field_name in (
+            "profile_file", "identification_file", "vehicle_file", "license_file",
+            "registration_file", "insurance_file", "accept_terms",
+        ):
+            self.assertTrue(form.fields[field_name].required)
+        self.assertIn("tipo carnet", form.fields["profile_file"].help_text)
+
+    def test_password_recovery_forms_have_expected_fields(self):
+        self.assertEqual(list(PasswordRecoveryRequestForm().fields), ["email"])
+        self.assertEqual(
+            list(PasswordResetConfirmForm().fields),
+            ["new_password", "confirm_password"],
+        )
+
     def test_public_contact_form_uses_compact_fields(self):
         form = PublicContactForm()
         self.assertIsInstance(form.fields["full_name"].widget, forms.TextInput)
@@ -326,6 +369,42 @@ class PanelIntegrationTests(TransactionTestCase):
         }
         values.update(overrides)
         return Ride.objects.create(**values)
+
+    @patch("panel.views.send_movix_email")
+    def test_driver_password_recovery_sends_custom_movix_link(self, send_email):
+        self.client.logout()
+        response = self.client.post(
+            reverse("password_recovery"),
+            {"email": self.driver_profile.email},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Revisa tu correo")
+        send_email.assert_called_once()
+        self.assertEqual(send_email.call_args.args[0], self.driver_profile.email)
+        self.assertIn("/recuperar-contrasena/", send_email.call_args.kwargs["action_url"])
+
+    @patch("panel.views.supabase_admin_update_password")
+    def test_driver_can_confirm_password_reset_for_supabase_auth(self, update_password):
+        self.client.logout()
+        token = signing.dumps(
+            {
+                "kind": "supabase",
+                "id": str(self.driver_profile.id),
+                "email": self.driver_profile.email,
+                "nonce": uuid.uuid4().hex,
+            },
+            salt="movix-password-reset",
+            compress=True,
+        )
+        response = self.client.post(
+            reverse("password_reset_confirm", kwargs={"token": token}),
+            {"new_password": "NuevaClaveMovix2026!", "confirm_password": "NuevaClaveMovix2026!"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Contraseña actualizada")
+        update_password.assert_called_once_with(self.driver_profile.id, "NuevaClaveMovix2026!")
 
     @patch("panel.views.supabase_password_sign_in")
     def test_driver_can_login_with_supabase_email_and_password(self, sign_in):

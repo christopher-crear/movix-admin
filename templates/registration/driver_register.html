@@ -1,0 +1,30 @@
+{% load static %}
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#155eef"><title>Registro de transportista · MOVIX</title><link rel="icon" href="{% static 'img/ICONO_APP.png' %}"><link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260811-80"><link rel="stylesheet" href="{% static 'css/auth.css' %}?v=20260811-80"></head>
+<body class="auth-page register-page">
+<header class="register-topbar"><a href="{% url 'login' %}" class="auth-brand"><img src="{% static 'img/ICONO_APP.png' %}" alt="MOVIX"><span><strong>MOVIX</strong><small>Tu carga, nuestro camino</small></span></a><a href="{% url 'login' %}">Ya tengo cuenta <b>Ingresar</b></a></header>
+<main class="register-shell">
+    <header class="register-heading"><span class="auth-kicker blue">Únete a la red MOVIX</span><h1>Registro de transportista</h1><p>Completa tus datos y carga documentos legibles. El administrador revisará el perfil antes de habilitarlo para recibir carreras.</p><div class="register-steps"><span><b>1</b>Datos</span><i></i><span><b>2</b>Vehículo</span><i></i><span><b>3</b>Documentos</span></div></header>
+    <form method="post" enctype="multipart/form-data" class="register-form">
+        {% csrf_token %}
+        {% if form.non_field_errors %}<div class="auth-alert error field-wide">{{ form.non_field_errors }}</div>{% endif %}
+        <section class="register-card"><div class="register-card-heading"><span>01</span><div><h2>Datos personales</h2><p>Información de contacto e identificación del titular.</p></div></div><div class="register-grid">
+            {% for field in form %}{% if field.name in 'first_name last_name email phone identification_number' %}<label><span>{{ field.label }}{% if field.field.required %}<em>*</em>{% endif %}</span>{{ field }}{{ field.errors }}</label>{% endif %}{% endfor %}
+        </div></section>
+        <section class="register-card"><div class="register-card-heading"><span>02</span><div><h2>Vehículo y experiencia</h2><p>Selecciona uno de los tres tipos admitidos por MOVIX.</p></div></div><div class="register-grid">
+            {% for field in form %}{% if field.name in 'license_number vehicle_plate load_capacity vehicle_year vehicle_type experience_years' %}<label><span>{{ field.label }}{% if field.field.required %}<em>*</em>{% endif %}</span>{{ field }}{{ field.errors }}</label>{% endif %}{% endfor %}
+        </div></section>
+        <section class="register-card documents-register-card"><div class="register-card-heading"><span>03</span><div><h2>Fotos y documentos requeridos</h2><p>Formatos admitidos: JPG, PNG, WEBP o PDF. Máximo {{ max_upload_mb|default:'10' }} MB por archivo.</p></div></div>
+            <div class="photo-guidance"><div><strong>Foto de perfil tipo carnet</strong><p>Reciente, de frente, rostro completo, fondo claro, buena iluminación y sin filtros, gorra ni gafas oscuras.</p></div><div><strong>Documentos legibles</strong><p>Fotografía o escaneo completo, sin recortes, sombras ni reflejos. Los datos y fechas deben poder leerse.</p></div></div>
+            <div class="upload-register-grid">
+                {% for field in form %}{% if field.name in 'profile_file identification_file vehicle_file license_file registration_file insurance_file' %}<label class="register-upload"><span class="upload-icon">{% if field.name == 'profile_file' %}👤{% elif field.name == 'vehicle_file' %}🚚{% else %}▤{% endif %}</span><strong>{{ field.label }} <em>*</em></strong><small>{{ field.help_text }}</small>{{ field }}<b data-file-name>Seleccionar archivo</b>{{ field.errors }}</label>{% endif %}{% endfor %}
+            </div>
+        </section>
+        <section class="register-card security-register-card"><div class="register-card-heading"><span>04</span><div><h2>Seguridad y consentimiento</h2><p>Usa una contraseña difícil de adivinar y revisa las condiciones.</p></div></div><div class="register-grid">
+            {% for field in form %}{% if field.name in 'password password_confirm' %}<label><span>{{ field.label }}<em>*</em></span><div class="auth-password">{{ field }}<button type="button" data-password-toggle="{{ field.id_for_label }}">Ver</button></div>{{ field.errors }}</label>{% endif %}{% endfor %}
+            <label class="register-terms field-wide">{{ form.accept_terms }}<span>Acepto los <a href="{% url 'terms_and_conditions' %}" target="_blank">términos y condiciones</a> y autorizo el tratamiento de los datos necesarios para validar mi cuenta.</span>{{ form.accept_terms.errors }}</label>
+        </div></section>
+        <div class="register-submit"><p><b>¿Todo listo?</b><span>Al enviar, tu perfil quedará pendiente de verificación.</span></p><button class="auth-primary" type="submit">Crear mi cuenta de transportista <span>→</span></button></div>
+    </form>
+</main>
+<script src="{% static 'js/app.js' %}?v=20260811-80"></script><script>document.querySelectorAll('.register-upload input[type=file]').forEach(input=>input.addEventListener('change',()=>{const label=input.closest('.register-upload').querySelector('[data-file-name]');label.textContent=input.files[0]?.name||'Seleccionar archivo';input.closest('.register-upload').classList.toggle('selected',!!input.files.length)}));</script>
+</body></html>

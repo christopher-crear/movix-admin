@@ -2,34 +2,49 @@
 <!doctype html>
 <html lang="es">
 <head>
-    <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="theme-color" content="#155eef">
     <title>Ingresar · MOVIX</title>
     <link rel="icon" href="{% static 'img/ICONO_APP.png' %}">
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260810-70">
-    <link rel="stylesheet" href="{% static 'css/driver_portal.css' %}?v=20260810-70">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260811-80">
+    <link rel="stylesheet" href="{% static 'css/auth.css' %}?v=20260811-80">
 </head>
-<body class="login-body movix-access-body">
-<main class="login-card movix-access-card">
-    <section class="login-visual movix-access-visual">
-        <div class="login-brand"><img src="{% static 'img/ICONO_APP.png' %}" alt="MOVIX"><span><strong>MOVIX</strong><small>Tu carga, nuestro camino</small></span></div>
-        <div><p class="eyebrow">Acceso por rol</p><h1>Tu espacio MOVIX, con tus datos reales.</h1><p>Los administradores ingresan al panel de gestión. Los transportistas acceden a sus estadísticas, carreras, comentarios y perfil conectado con Supabase.</p></div>
-        <div class="access-role-preview"><span>Administrador</span><i></i><span>Transportista</span></div>
+<body class="auth-page">
+<main class="auth-shell auth-login-shell">
+    <section class="auth-story" aria-label="MOVIX conecta tus entregas en Loja">
+        <header class="auth-brand">
+            <img src="{% static 'img/ICONO_APP.png' %}" alt="Logo MOVIX">
+            <span><strong>MOVIX</strong><small>Tu carga, nuestro camino</small></span>
+        </header>
+        <div class="auth-story-copy">
+            <span class="auth-kicker">Movilidad que conecta Loja</span>
+            <h1>Tu carga llega.<br>Tu tranquilidad también.</h1>
+            <p>Gestiona tu trabajo, revisa tus carreras y mantén tus documentos al día desde un solo lugar.</p>
+        </div>
+        <figure class="auth-route-art"><img src="{% static 'img/movix-login-route.png' %}" alt="Camión MOVIX entregando un paquete en Loja"></figure>
+        <div class="auth-trust-row"><span>✓ Perfiles verificados</span><span>✓ Datos protegidos</span><span>✓ Soporte local</span></div>
     </section>
-    <section class="login-form-section movix-access-form">
-        <div class="mobile-login-brand"><img src="{% static 'img/ICONO_APP.png' %}" alt="MOVIX"><strong>MOVIX</strong></div>
-        <p class="eyebrow">Acceso seguro</p><h2>Bienvenido a MOVIX</h2><p>El sistema comprobará tu cuenta y abrirá el módulo correspondiente a tu rol.</p>
-        {% if messages %}{% for message in messages %}<div class="alert alert-{{ message.tags|default:'error' }}"><span>{{ message }}</span></div>{% endfor %}{% endif %}
-        <form method="post" class="stack-form">
+
+    <section class="auth-panel">
+        <div class="auth-mobile-brand"><img src="{% static 'img/ICONO_APP.png' %}" alt="MOVIX"><strong>MOVIX</strong></div>
+        <span class="auth-kicker blue">Acceso seguro</span>
+        <h2>Bienvenido a MOVIX</h2>
+        <p class="auth-subtitle">Ingresa con tu cuenta. Abriremos automáticamente el panel correspondiente a tu rol.</p>
+        {% if messages %}<div class="auth-alerts">{% for message in messages %}<div class="auth-alert {{ message.tags|default:'error' }}">{{ message }}</div>{% endfor %}</div>{% endif %}
+        <form method="post" class="auth-form">
             {% csrf_token %}
-            <div class="field"><label for="id_username">Usuario o correo</label><input class="form-control" id="id_username" name="username" autocomplete="username" autofocus required placeholder="correo@gmail.com"></div>
-            <div class="field"><label for="id_password">Contraseña</label><div class="password-wrap"><input class="form-control" type="password" id="id_password" name="password" autocomplete="current-password" required><button type="button" data-password-toggle="id_password">Ver</button></div></div>
+            <label><span>Correo o usuario</span><input class="form-control" name="username" autocomplete="username" autofocus required placeholder="correo@gmail.com"></label>
+            <label><span>Contraseña</span><div class="auth-password"><input class="form-control" type="password" id="id_password" name="password" autocomplete="current-password" required placeholder="Escribe tu contraseña"><button type="button" data-password-toggle="id_password">Ver</button></div></label>
+            <div class="auth-form-options"><label class="auth-check"><input type="checkbox" name="remember"><span>Recordarme</span></label><a href="{% url 'password_recovery' %}">¿Olvidaste tu contraseña?</a></div>
             {% if request.GET.next %}<input type="hidden" name="next" value="{{ request.GET.next }}">{% endif %}
-            <button class="btn btn-primary btn-lg" type="submit">Ingresar a MOVIX</button>
+            <button class="auth-primary" type="submit">Ingresar a MOVIX <span>→</span></button>
         </form>
-        <div class="access-divider"><span>o continúa con</span></div>
-        {% if google_url %}<a class="google-auth-button" href="{{ google_url }}"><b>G</b> Continuar con Google</a>{% else %}<button class="google-auth-button" type="button" disabled title="Configura SUPABASE_URL para habilitar Google"><b>G</b> Continuar con Google</button>{% endif %}
-        <small class="security-note">Las contraseñas se validan en Django para administradores y en Supabase Auth para cuentas de la aplicación.</small>
+        <div class="auth-divider"><span>o continúa con</span></div>
+        {% if google_url %}<a class="auth-google" href="{{ google_url }}">{% include 'registration/_google_logo.html' %}<span>Continuar con Google</span></a>{% else %}<button class="auth-google" type="button" disabled>{% include 'registration/_google_logo.html' %}<span>Continuar con Google</span></button>{% endif %}
+        <div class="auth-register-callout"><span>¿Quieres trabajar con MOVIX?</span><a href="{% url 'driver_registration' %}">Crear cuenta de transportista</a></div>
+        <p class="auth-legal">Al continuar confirmas que conoces nuestros <a href="{% url 'terms_and_conditions' %}" target="_blank">términos y condiciones</a>.</p>
     </section>
 </main>
-<script src="{% static 'js/app.js' %}?v=20260810-70"></script>
-</body></html>
+<script src="{% static 'js/app.js' %}?v=20260811-80"></script>
+</body>
+</html>

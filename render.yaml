@@ -45,6 +45,8 @@ services:
         value: eraschristopher0@gmail.com
       - key: BREVO_SENDER_NAME
         value: MOVIX
+      - key: MOVIX_SUPPORT_EMAIL
+        value: eraschristopher0@gmail.com
       - key: EMAIL_TIMEOUT
         value: "12"
       - key: DEFAULT_FROM_EMAIL

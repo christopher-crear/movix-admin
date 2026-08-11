@@ -1,5 +1,7 @@
 from django import forms
+from django.contrib.auth import password_validation
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 
 from .models import (
     AdminProfile,
@@ -145,6 +147,94 @@ class ProfileCreateForm(ProfileForm):
         cleaned = super().clean()
         if cleaned.get("password") != cleaned.get("password_confirm"):
             self.add_error("password_confirm", "Las contraseñas no coinciden.")
+        return cleaned
+
+
+class PublicDriverRegistrationForm(ProfileCreateForm):
+    """Registro público completo; siempre crea un transportista pendiente."""
+
+    accept_terms = forms.BooleanField(
+        label="Acepto los términos y condiciones y la política de tratamiento de datos",
+        error_messages={"required": "Debes aceptar los términos y condiciones para registrarte."},
+    )
+
+    def __init__(self, *args, **kwargs):
+        kwargs.pop("role", None)
+        super().__init__(*args, role="transportista", **kwargs)
+        self.fields["password"].label = "Contraseña"
+        self.fields["password_confirm"].label = "Repite la contraseña"
+        self.fields["experience_years"].required = True
+        for name in (
+            "identification_file", "profile_file", "vehicle_file", "license_file",
+            "registration_file", "insurance_file",
+        ):
+            self.fields[name].required = True
+        self.fields["profile_file"].help_text = (
+            "Foto reciente tipo carnet: de frente, rostro visible, fondo claro, sin filtros, gorra ni gafas oscuras."
+        )
+        self.fields["vehicle_file"].help_text = "Fotografía completa y nítida del vehículo; la placa debe ser visible."
+        self.fields["identification_file"].help_text = "Cédula completa, vigente, legible y sin reflejos. JPG, PNG, WEBP o PDF."
+        self.fields["license_file"].help_text = "Licencia de conducir completa, vigente y legible."
+        self.fields["registration_file"].help_text = "Matrícula vehicular completa y vigente."
+        self.fields["insurance_file"].help_text = "Documento vigente del seguro vehicular."
+        self.order_fields([
+            "first_name", "last_name", "email", "phone", "identification_number",
+            "license_number", "vehicle_plate", "load_capacity", "vehicle_year",
+            "vehicle_type", "experience_years", "profile_file", "identification_file",
+            "vehicle_file", "license_file", "registration_file", "insurance_file",
+            "password", "password_confirm", "accept_terms",
+        ])
+
+    def clean_email(self):
+        return (self.cleaned_data.get("email") or "").strip().lower()
+
+    def clean(self):
+        cleaned = super().clean()
+        password = cleaned.get("password")
+        if password:
+            try:
+                password_validation.validate_password(password)
+            except ValidationError as exc:
+                self.add_error("password", exc)
+        return cleaned
+
+
+class PasswordRecoveryRequestForm(StyledFormMixin, forms.Form):
+    email = forms.EmailField(
+        label="Correo de tu cuenta MOVIX",
+        widget=forms.EmailInput(attrs={"autocomplete": "email", "placeholder": "correo@gmail.com"}),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.apply_styles()
+
+
+class PasswordResetConfirmForm(StyledFormMixin, forms.Form):
+    new_password = forms.CharField(
+        label="Nueva contraseña",
+        min_length=8,
+        widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
+    )
+    confirm_password = forms.CharField(
+        label="Repite la nueva contraseña",
+        widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.apply_styles()
+
+    def clean(self):
+        cleaned = super().clean()
+        password = cleaned.get("new_password")
+        if password and password != cleaned.get("confirm_password"):
+            self.add_error("confirm_password", "Las contraseñas no coinciden.")
+        if password:
+            try:
+                password_validation.validate_password(password)
+            except ValidationError as exc:
+                self.add_error("new_password", exc)
         return cleaned
 
 

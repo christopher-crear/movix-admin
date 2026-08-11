@@ -105,6 +105,26 @@ def supabase_update_password(access_token, new_password):
     return response.json()
 
 
+def supabase_admin_update_password(user_id, new_password):
+    """Restablece la clave de una cuenta concreta desde el backend seguro."""
+    try:
+        response = requests.put(
+            f"{settings.SUPABASE_URL}/auth/v1/admin/users/{user_id}",
+            headers=_supabase_headers("application/json"),
+            json={"password": new_password},
+            timeout=(8, 25),
+        )
+    except requests.RequestException as exc:
+        raise ValidationError(f"No se pudo conectar con Supabase para restablecer la contraseña: {exc}") from exc
+    if response.status_code != 200:
+        try:
+            detail = response.json().get("msg") or response.json().get("message")
+        except ValueError:
+            detail = response.text
+        raise ValidationError(str(detail or "Supabase rechazó la nueva contraseña.")[:240])
+    return response.json()
+
+
 def _storage_error(response, action):
     try:
         payload = response.json()
@@ -499,15 +519,35 @@ def build_monthly_invoice_pdf(invoice):
     return output.getvalue()
 
 
-def send_movix_email(recipient, subject, body, attachment_name=None, attachment_bytes=None):
+def send_movix_email(
+    recipient,
+    subject,
+    body,
+    attachment_name=None,
+    attachment_bytes=None,
+    action_url=None,
+    action_label=None,
+):
     """Envía por Brevo HTTPS o SMTP y permite adjuntar una factura PDF."""
     if not recipient:
         return False, "El transportista no tiene correo registrado."
+    action_html = ""
+    if action_url:
+        safe_url = html_escape(str(action_url), quote=True)
+        safe_label = html_escape(str(action_label or "Abrir en MOVIX"))
+        action_html = (
+            '<p style="margin:28px 0">'
+            f'<a href="{safe_url}" style="display:inline-block;background:#1f5eff;color:#fff;'
+            'padding:13px 22px;border-radius:10px;text-decoration:none;font-weight:700">'
+            f'{safe_label}</a></p>'
+            f'<p style="font-size:12px;color:#71809a;word-break:break-all">{safe_url}</p>'
+        )
     html = (
         '<div style="font-family:Arial,sans-serif;color:#183153;max-width:620px">'
         '<h2 style="color:#1f5fff">MOVIX</h2>'
         f'<h3>{html_escape(str(subject))}</h3>'
         f'<p style="line-height:1.6">{html_escape(str(body)).replace(chr(10), "<br>")}</p>'
+        f'{action_html}'
         '<p style="color:#71809a">Tu carga, nuestro camino.</p></div>'
     )
     if settings.EMAIL_PROVIDER == "brevo":

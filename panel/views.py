@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import json
 import mimetypes
 import uuid
@@ -13,10 +14,11 @@ from django.contrib.auth import authenticate, login as django_login, logout as d
 from django.contrib.auth.forms import PasswordChangeForm
 from django.contrib.auth.models import User
 from django.core.cache import cache
+from django.core import signing
 from django.core.files.base import ContentFile
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
-from django.db import DatabaseError
+from django.db import DatabaseError, transaction
 from django.db.models import Avg, Count, DecimalField, Q, Sum
 from django.db.models.functions import Coalesce, TruncDate, TruncMonth
 from django.http import Http404, HttpResponse, StreamingHttpResponse
@@ -39,6 +41,9 @@ from .forms import (
     NotificationForm,
     PaymentBankAccountForm,
     PublicContactForm,
+    PublicDriverRegistrationForm,
+    PasswordRecoveryRequestForm,
+    PasswordResetConfirmForm,
     ProfileCreateForm,
     ProfileForm,
     SettingsForm,
@@ -72,6 +77,7 @@ from .services import (
     send_movix_email,
     send_push_notifications,
     supabase_password_sign_in,
+    supabase_admin_update_password,
     supabase_update_password,
     supabase_user_from_token,
     upload_to_supabase,
@@ -163,6 +169,138 @@ def landing(request):
 def demo_app(request):
     """Simulación pública y aislada del flujo móvil de MOVIX."""
     return render(request, "demo.html")
+
+
+def terms_and_conditions(request):
+    """Condiciones informativas de demostración para el registro público."""
+    return render(request, "registration/terms.html")
+
+
+def driver_registration(request):
+    """Alta pública de transportistas en Supabase Auth, Profile y Storage."""
+    if request.user.is_authenticated or request.session.get("portal_profile_id"):
+        return redirect("login")
+    form = PublicDriverRegistrationForm(request.POST or None, request.FILES or None)
+    if request.method == "POST" and form.is_valid():
+        email = form.cleaned_data["email"]
+        if Profile.objects.filter(email__iexact=email).exists() or User.objects.filter(email__iexact=email).exists():
+            form.add_error("email", "Ya existe una cuenta MOVIX con este correo.")
+        else:
+            created_auth_id = None
+            replacements = []
+            try:
+                created_auth_id = create_supabase_auth_user(
+                    email,
+                    form.cleaned_data["password"],
+                    {
+                        "role": "transportista",
+                        "first_name": form.cleaned_data["first_name"],
+                        "last_name": form.cleaned_data["last_name"],
+                        "terms_accepted": True,
+                        "terms_version": "demo-2026-08",
+                    },
+                )
+                with transaction.atomic():
+                    profile = Profile.objects.filter(pk=created_auth_id).first()
+                    already_exists = profile is not None
+                    if profile is None:
+                        profile = form.save(commit=False)
+                        profile.id = created_auth_id
+                    else:
+                        for field_name in ProfileForm.Meta.fields:
+                            if field_name in form.cleaned_data:
+                                setattr(profile, field_name, form.cleaned_data[field_name])
+                    profile.role = "transportista"
+                    profile.cedula = profile.identification_number
+                    profile.created_at = profile.created_at or timezone.now()
+                    profile.updated_at = timezone.now()
+                    profile.is_active = True
+                    profile.is_available = False
+                    profile.verified = False
+                    profile.profile_verified = False
+                    profile.verification_status = "pending"
+                    replacements = _upload_profile_files(profile, form, "drivers")
+                    profile.save(force_insert=not already_exists)
+                _finish_file_replacements(replacements, saved=True)
+                send_movix_email(
+                    email,
+                    "Registro recibido en MOVIX",
+                    "Tu cuenta de transportista fue creada. Revisaremos tus datos y documentos. "
+                    "Ya puedes ingresar al portal para consultar el estado de la verificación.",
+                    action_url=request.build_absolute_uri(reverse("login")),
+                    action_label="Ingresar a MOVIX",
+                )
+                messages.success(request, "Registro completado. Tus documentos quedaron pendientes de revisión.")
+                return redirect("login")
+            except (ValidationError, DatabaseError, requests.RequestException) as exc:
+                _finish_file_replacements(replacements, saved=False)
+                if created_auth_id:
+                    try:
+                        delete_supabase_auth_user(created_auth_id)
+                    except (ValidationError, requests.RequestException):
+                        pass
+                form.add_error(None, exc)
+    return render(request, "registration/driver_register.html", {"form": form})
+
+
+def password_recovery(request):
+    """Solicita un enlace firmado sin revelar si el correo está registrado."""
+    form = PasswordRecoveryRequestForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        email = form.cleaned_data["email"].strip().lower()
+        profile = Profile.objects.filter(email__iexact=email).first()
+        staff_user = User.objects.filter(email__iexact=email, is_active=True, is_staff=True).first()
+        payload = None
+        if profile:
+            payload = {"kind": "supabase", "id": str(profile.id), "email": email, "nonce": uuid.uuid4().hex}
+        elif staff_user:
+            payload = {"kind": "django", "id": staff_user.pk, "email": email, "nonce": uuid.uuid4().hex}
+        if payload:
+            token = signing.dumps(payload, salt="movix-password-reset", compress=True)
+            reset_url = request.build_absolute_uri(reverse("password_reset_confirm", kwargs={"token": token}))
+            send_movix_email(
+                email,
+                "Recupera tu contraseña de MOVIX",
+                "Recibimos una solicitud para cambiar tu contraseña. El enlace será válido por 30 minutos. "
+                "Si no hiciste esta solicitud, ignora este mensaje.",
+                action_url=reset_url,
+                action_label="Crear nueva contraseña",
+            )
+        return render(request, "registration/password_recovery_sent.html", {"email": email})
+    return render(request, "registration/password_recovery.html", {"form": form})
+
+
+def password_reset_confirm(request, token):
+    """Valida el enlace firmado y cambia la clave en Django o Supabase Auth."""
+    invalid = False
+    payload = None
+    token_key = f"movix-reset-used:{hashlib.sha256(token.encode()).hexdigest()}"
+    try:
+        payload = signing.loads(token, salt="movix-password-reset", max_age=30 * 60)
+        if cache.get(token_key):
+            invalid = True
+    except (signing.BadSignature, signing.SignatureExpired):
+        invalid = True
+
+    form = PasswordResetConfirmForm(request.POST or None)
+    if request.method == "POST" and not invalid and form.is_valid():
+        try:
+            if payload.get("kind") == "django":
+                user = User.objects.get(pk=payload["id"], is_active=True, is_staff=True)
+                user.set_password(form.cleaned_data["new_password"])
+                user.save(update_fields=["password"])
+            else:
+                profile = Profile.objects.get(pk=payload["id"], email__iexact=payload["email"])
+                supabase_admin_update_password(profile.id, form.cleaned_data["new_password"])
+            cache.set(token_key, True, 60 * 60)
+            return render(request, "registration/password_reset_done.html")
+        except (User.DoesNotExist, Profile.DoesNotExist, ValidationError, DatabaseError) as exc:
+            form.add_error(None, str(exc))
+    return render(
+        request,
+        "registration/password_reset_confirm.html",
+        {"form": form, "invalid": invalid},
+    )
 
 
 def _portal_profile_from_auth(request, auth_user, auth_payload):

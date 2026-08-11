@@ -2,5 +2,26 @@
 {% block title %}Configuración{% endblock %}
 {% block content %}
 <div class="page-heading"><div><h1>Configuración</h1><p>Preferencias generales del panel administrativo</p></div></div>
-<div class="settings-layout"><section class="card form-card"><h2>Configuración general</h2><form method="post" class="settings-form">{% csrf_token %}{{ form.non_field_errors }}{% for field in form %}<div class="setting-row"><div>{{ field.label_tag }}{% if field.name == 'maintenance_mode' %}<small>Muestra el estado para que la app pueda restringir temporalmente las operaciones.</small>{% elif field.name == 'dark_mode' %}<small>La preferencia se guarda en este navegador.</small>{% endif %}</div>{{ field }}{{ field.errors }}</div>{% endfor %}<button class="btn btn-primary" type="submit">Guardar configuración</button></form></section><aside class="card config-help"><h2>Conexiones</h2><ul><li><strong>Supabase PostgreSQL</strong><span>Configurado con DATABASE_URL</span></li><li><strong>Supabase Storage</strong><span>Usa SUPABASE_SERVICE_ROLE_KEY</span></li><li><strong>Firebase Cloud Messaging</strong><span>Opcional para notificaciones push</span></li><li><strong>Render</strong><span>Listo mediante render.yaml</span></li></ul><p>Las claves nunca se guardan desde esta pantalla. Se configuran como variables secretas en Render.</p></aside></div>
+<div class="settings-layout">
+    <section class="card form-card">
+        <h2>Configuración general</h2>
+        <form method="post" class="settings-form">
+            {% csrf_token %}{{ form.non_field_errors }}{% for field in form %}
+            <div class="setting-row">
+                <div>{{ field.label_tag }}{% if field.name == 'maintenance_mode' %}
+                    <small>Muestra el estado para que la app pueda restringir temporalmente las operaciones.</small>
+                    {% elif field.name == 'dark_mode' %}<small>La preferencia se guarda en este navegador.</small>
+                    {% endif %}</div>{{ field }}{{ field.errors }}
+                </div>{% endfor %}<button class="btn btn-primary" type="submit">Guardar configuración</button>
+            </form>
+        </section>
+        <aside class="card config-help">
+    <h2>Conexiones</h2>
+    <ul><li><strong>Supabase PostgreSQL</strong>
+        <span>Configurado con DATABASE_URL</span>
+    </li><li><strong>Supabase Storage</strong>
+        <span>Usa SUPABASE_SERVICE_ROLE_KEY</span>
+    </li><li><strong>Firebase Cloud Messaging</strong>
+        <span>Opcional para notificaciones push</span></li><li><strong>Render</strong><span>Listo mediante render.yaml</span>
+        </li></ul><p>Las claves nunca se guardan desde esta pantalla. Se configuran como variables secretas en Render.</p></aside></div>
 {% endblock %}

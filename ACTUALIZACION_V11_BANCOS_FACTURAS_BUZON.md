@@ -48,10 +48,10 @@ aplicación**. En `.env` local o en **Render → Environment** agrega:
 ```env
 EMAIL_HOST=smtp.gmail.com
 EMAIL_PORT=587
-EMAIL_HOST_USER=movix_soporte@gmail.com
+EMAIL_HOST_USER=eraschristopher0@gmail.com
 EMAIL_HOST_PASSWORD=CONTRASENA_DE_APLICACION
 EMAIL_USE_TLS=True
-DEFAULT_FROM_EMAIL=MOVIX <movix_soporte@gmail.com>
+DEFAULT_FROM_EMAIL=MOVIX <eraschristopher0@gmail.com>
 ```
 
 No uses ni publiques la contraseña normal de Gmail. Si SMTP no está
