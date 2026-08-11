@@ -141,7 +141,7 @@ EMAIL_PROVIDER = os.getenv(
 ).strip().lower()
 BREVO_API_KEY = os.getenv("BREVO_API_KEY", "").strip()
 BREVO_API_URL = os.getenv("BREVO_API_URL", "https://api.brevo.com/v3/smtp/email").strip()
-BREVO_SENDER_EMAIL = os.getenv("BREVO_SENDER_EMAIL", "movix_soporte@gmail.com").strip()
+BREVO_SENDER_EMAIL = os.getenv("BREVO_SENDER_EMAIL", "eraschristopher0@gmail.com").strip()
 BREVO_SENDER_NAME = os.getenv("BREVO_SENDER_NAME", "MOVIX").strip()
 EMAIL_BACKEND = os.getenv(
     "EMAIL_BACKEND",
@@ -153,7 +153,7 @@ EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True").lower() in {"1", "true", "yes", "on"}
 EMAIL_TIMEOUT = int(os.getenv("EMAIL_TIMEOUT", "12"))
-DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER or "MOVIX <movix_soporte@gmail.com>")
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER or "MOVIX <eraschristopher0@gmail.com>")
 
 # Datos públicos mostrados únicamente en la landing.
 MOVIX_SUPPORT_EMAIL = os.getenv("MOVIX_SUPPORT_EMAIL", "movix_soporte@gmail.com")

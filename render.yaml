@@ -42,13 +42,13 @@ services:
       - key: BREVO_API_KEY
         sync: false
       - key: BREVO_SENDER_EMAIL
-        value: movix_soporte@gmail.com
+        value: eraschristopher0@gmail.com
       - key: BREVO_SENDER_NAME
         value: MOVIX
       - key: EMAIL_TIMEOUT
         value: "12"
       - key: DEFAULT_FROM_EMAIL
-        value: "MOVIX <movix_soporte@gmail.com>"
+        value: "MOVIX <eraschristopher0@gmail.com>"
       - key: ALLOWED_HOSTS
         sync: false
       - key: CSRF_TRUSTED_ORIGINS
