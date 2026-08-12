@@ -373,3 +373,10 @@ Después del primer despliegue añade la URL exacta de Render terminada en
 - Los documentos privados usan enlaces con caducidad.
 - Las eliminaciones muestran confirmación y se registran en auditoría.
 - Antes de producción, crea una copia de seguridad de Supabase y prueba primero con datos de prueba controlados.
+# Actualización V17
+
+Para habilitar el bloqueo real compatible con la app y el descarte seguro de notificaciones, ejecuta en Supabase SQL Editor:
+
+`sql/010_account_blocks_and_notification_links.sql`
+
+Consulta `ACTUALIZACION_V17_BLOQUEO_GOOGLE_NOTIFICACIONES.md` para integrar el gesto `Dismissible` de Flutter y probar el registro con Google y el pago físico con factura automática.

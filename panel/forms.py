@@ -159,16 +159,27 @@ class PublicDriverRegistrationForm(ProfileCreateForm):
     )
 
     def __init__(self, *args, **kwargs):
+        self.google_registration = bool(kwargs.pop("google_registration", False))
+        self.google_avatar_url = (kwargs.pop("google_avatar_url", "") or "").strip()
         kwargs.pop("role", None)
         super().__init__(*args, role="transportista", **kwargs)
         self.fields["password"].label = "Contraseña"
         self.fields["password_confirm"].label = "Repite la contraseña"
         self.fields["experience_years"].required = True
         for name in (
-            "identification_file", "profile_file", "vehicle_file", "license_file",
+            "identification_file", "vehicle_file", "license_file",
             "registration_file", "insurance_file",
         ):
             self.fields[name].required = True
+        # Google entrega una fotografía únicamente cuando la cuenta posee una.
+        # En ese caso se usa como avatar y no se vuelve a exigir otra carga.
+        self.fields["profile_file"].required = not bool(self.google_avatar_url)
+        if self.google_registration:
+            self.fields["email"].disabled = True
+            self.fields["password"].required = False
+            self.fields["password_confirm"].required = False
+            self.fields["password"].widget = forms.HiddenInput()
+            self.fields["password_confirm"].widget = forms.HiddenInput()
         self.fields["profile_file"].help_text = (
             "Foto reciente tipo carnet: de frente, rostro visible, fondo claro, sin filtros, gorra ni gafas oscuras."
         )
@@ -190,6 +201,11 @@ class PublicDriverRegistrationForm(ProfileCreateForm):
 
     def clean(self):
         cleaned = super().clean()
+        if self.google_registration:
+            # ProfileCreateForm compara ambos valores. Los dejamos vacíos
+            # porque la identidad ya fue validada por Google/Supabase.
+            cleaned["password"] = ""
+            cleaned["password_confirm"] = ""
         password = cleaned.get("password")
         if password:
             try:

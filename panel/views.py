@@ -180,26 +180,50 @@ def driver_registration(request):
     """Alta pública de transportistas en Supabase Auth, Profile y Storage."""
     if request.user.is_authenticated or request.session.get("portal_profile_id"):
         return redirect("login")
-    form = PublicDriverRegistrationForm(request.POST or None, request.FILES or None)
+    google_pending = request.session.get("google_driver_registration") or {}
+    google_registration = bool(google_pending.get("id"))
+    google_avatar_url = (google_pending.get("avatar_url") or "").strip()
+    initial = {}
+    if google_registration:
+        full_name = (google_pending.get("full_name") or "").strip().split(maxsplit=1)
+        initial = {
+            "email": google_pending.get("email", ""),
+            "first_name": full_name[0] if full_name else "",
+            "last_name": full_name[1] if len(full_name) > 1 else "",
+        }
+    form = PublicDriverRegistrationForm(
+        request.POST or None,
+        request.FILES or None,
+        initial=initial,
+        google_registration=google_registration,
+        google_avatar_url=google_avatar_url,
+    )
     if request.method == "POST" and form.is_valid():
         email = form.cleaned_data["email"]
-        if Profile.objects.filter(email__iexact=email).exists() or User.objects.filter(email__iexact=email).exists():
+        existing_profile = Profile.objects.filter(email__iexact=email).first()
+        google_owns_existing = google_registration and existing_profile and str(existing_profile.id) == str(google_pending["id"])
+        if (existing_profile and not google_owns_existing) or User.objects.filter(email__iexact=email).exists():
             form.add_error("email", "Ya existe una cuenta MOVIX con este correo.")
         else:
             created_auth_id = None
+            created_auth_here = False
             replacements = []
             try:
-                created_auth_id = create_supabase_auth_user(
-                    email,
-                    form.cleaned_data["password"],
-                    {
-                        "role": "transportista",
-                        "first_name": form.cleaned_data["first_name"],
-                        "last_name": form.cleaned_data["last_name"],
-                        "terms_accepted": True,
-                        "terms_version": "demo-2026-08",
-                    },
-                )
+                if google_registration:
+                    created_auth_id = google_pending["id"]
+                else:
+                    created_auth_id = create_supabase_auth_user(
+                        email,
+                        form.cleaned_data["password"],
+                        {
+                            "role": "transportista",
+                            "first_name": form.cleaned_data["first_name"],
+                            "last_name": form.cleaned_data["last_name"],
+                            "terms_accepted": True,
+                            "terms_version": "demo-2026-08",
+                        },
+                    )
+                    created_auth_here = True
                 with transaction.atomic():
                     profile = Profile.objects.filter(pk=created_auth_id).first()
                     already_exists = profile is not None
@@ -215,11 +239,15 @@ def driver_registration(request):
                     profile.created_at = profile.created_at or timezone.now()
                     profile.updated_at = timezone.now()
                     profile.is_active = True
+                    profile.is_blocked = False
                     profile.is_available = False
                     profile.verified = False
                     profile.profile_verified = False
                     profile.verification_status = "pending"
                     replacements = _upload_profile_files(profile, form, "drivers")
+                    if google_avatar_url and not profile.profile_photo_url:
+                        profile.profile_photo_url = google_avatar_url
+                        profile.avatar_url = google_avatar_url
                     profile.save(force_insert=not already_exists)
                 _finish_file_replacements(replacements, saved=True)
                 send_movix_email(
@@ -231,16 +259,29 @@ def driver_registration(request):
                     action_label="Ingresar a MOVIX",
                 )
                 messages.success(request, "Registro completado. Tus documentos quedaron pendientes de revisión.")
+                if google_registration:
+                    auth_payload = google_pending.get("auth_payload") or {}
+                    request.session.pop("google_driver_registration", None)
+                    destination = _portal_profile_from_auth(
+                        request,
+                        {"id": str(profile.id), "email": profile.email, "user_metadata": {"avatar_url": google_avatar_url}},
+                        auth_payload,
+                    )
+                    return redirect(destination)
                 return redirect("login")
             except (ValidationError, DatabaseError, requests.RequestException) as exc:
                 _finish_file_replacements(replacements, saved=False)
-                if created_auth_id:
+                if created_auth_id and created_auth_here:
                     try:
                         delete_supabase_auth_user(created_auth_id)
                     except (ValidationError, requests.RequestException):
                         pass
                 form.add_error(None, exc)
-    return render(request, "registration/driver_register.html", {"form": form})
+    return render(request, "registration/driver_register.html", {
+        "form": form,
+        "google_registration": google_registration,
+        "google_avatar_url": google_avatar_url,
+    })
 
 
 def password_recovery(request):
@@ -310,10 +351,36 @@ def _portal_profile_from_auth(request, auth_user, auth_payload):
     if not user_id:
         raise ValidationError("Supabase no devolvió el identificador de la cuenta.")
     profile = Profile.objects.filter(pk=user_id).first()
+    metadata = auth_user.get("user_metadata") or {}
+    app_metadata = auth_user.get("app_metadata") or {}
+    provider = str(app_metadata.get("provider") or metadata.get("provider") or "").lower()
+    google_registration_data = {
+                "id": str(user_id),
+                "email": email,
+                "full_name": metadata.get("full_name") or metadata.get("name") or "",
+                "avatar_url": metadata.get("avatar_url") or metadata.get("picture") or "",
+                "auth_payload": {
+                    "access_token": auth_payload.get("access_token", ""),
+                    "refresh_token": auth_payload.get("refresh_token", ""),
+                },
+            }
     if not profile:
+        if provider == "google":
+            request.session["google_driver_registration"] = google_registration_data
+            return reverse("driver_registration")
         raise ValidationError("La cuenta existe en Supabase Auth, pero todavía no tiene un perfil en MOVIX.")
-    if not profile.is_active:
+    if profile.account_blocked:
         raise ValidationError("Tu cuenta está bloqueada. Comunícate con soporte MOVIX.")
+
+    # Si Google proporciona una imagen y el perfil todavía no tiene una, se
+    # guarda como avatar. No se reemplazan fotografías cargadas manualmente.
+    metadata = auth_user.get("user_metadata") or {}
+    google_avatar = (metadata.get("avatar_url") or metadata.get("picture") or "").strip()
+    if google_avatar and not profile.has_profile_photo:
+        profile.profile_photo_url = google_avatar
+        profile.avatar_url = google_avatar
+        profile.updated_at = timezone.now()
+        profile.save(update_fields=["profile_photo_url", "avatar_url", "updated_at"])
 
     # La coincidencia de correo nunca concede permisos administrativos. El rol
     # de la identidad de Supabase es la fuente de verdad para este flujo.
@@ -330,6 +397,21 @@ def _portal_profile_from_auth(request, auth_user, auth_payload):
             )
         django_login(request, staff_user, backend="django.contrib.auth.backends.ModelBackend")
         return reverse("panel:dashboard")
+
+    # Algunos proyectos crean automáticamente una fila mínima en `profiles`
+    # al autenticar con Google. Si aún faltan los datos obligatorios, continúa
+    # en el formulario de registro en lugar de abrir un panel incompleto. Esto
+    # se comprueba antes del rol porque el trigger de Supabase suele crear el
+    # perfil de Google inicialmente con el rol `cliente`.
+    required_driver_values = [
+        profile.identification_number or profile.cedula,
+        profile.license_number,
+        profile.vehicle_plate,
+        profile.vehicle_type,
+    ]
+    if provider == "google" and (not profile.is_driver or not all(required_driver_values)):
+        request.session["google_driver_registration"] = google_registration_data
+        return reverse("driver_registration")
 
     if not profile.is_driver:
         raise ValidationError("Este portal web está disponible para transportistas. Los clientes continúan usando la app MOVIX.")
@@ -465,7 +547,7 @@ def access_logout(request):
 def _current_driver(request):
     profile_id = request.session.get("portal_profile_id")
     profile = Profile.objects.filter(pk=profile_id).first() if profile_id else None
-    if not profile or not profile.is_driver or not profile.is_active:
+    if not profile or not profile.is_driver or profile.account_blocked:
         request.session.pop("portal_profile_id", None)
         raise PermissionDenied("La sesión no corresponde a un transportista activo.")
     return profile
@@ -875,7 +957,10 @@ def monthly_payment_review(request, payment_id, decision):
 @require_POST
 def monthly_payment_physical(request, profile_id):
     driver = get_object_or_404(_profile_queryset("drivers"), pk=profile_id)
-    period = timezone.localdate().replace(day=1)
+    try:
+        period = datetime.strptime(request.POST.get("period", ""), "%Y-%m").date().replace(day=1)
+    except ValueError:
+        period = timezone.localdate().replace(day=1)
     try:
         amount = Decimal(request.POST.get("amount", "0"))
     except Exception:
@@ -902,8 +987,9 @@ def monthly_payment_physical(request, profile_id):
         payment.updated_at = payment.reviewed_at
         payment.save(update_fields=["status", "bank", "payment_method", "amount", "reviewed_by", "reviewed_at", "updated_at"])
     _notify_profile(driver, "Mensualidad registrada", f"Tu pago físico de {period:%m/%Y} fue registrado.", "monthly_payment")
-    messages.success(request, "Pago físico registrado y aprobado.")
-    return redirect("panel:monthly_payment_list")
+    audit(request, "approve", "driver_monthly_payment", f"Registró pago físico de {driver.full_name}", payment.id)
+    messages.success(request, "Pago físico registrado. Ahora se generará la factura automáticamente.")
+    return monthly_payment_invoice(request, payment.id)
 
 
 def _notify_profile(profile, title, message, notification_type):
@@ -922,6 +1008,7 @@ def driver_payment_block(request, profile_id, action):
     driver = get_object_or_404(_profile_queryset("drivers"), pk=profile_id)
     if action == "unblock":
         driver.is_active = True
+        driver.is_blocked = False
         driver.blocked_at = None
         driver.blocked_reason = None
         message = "Tu cuenta MOVIX fue habilitada nuevamente."
@@ -932,6 +1019,7 @@ def driver_payment_block(request, profile_id, action):
             messages.error(request, "Debes indicar el motivo del bloqueo.")
             return redirect(request.META.get("HTTP_REFERER") or "panel:monthly_payment_list")
         driver.is_active = False
+        driver.is_blocked = True
         driver.blocked_at = timezone.now()
         driver.blocked_reason = form.cleaned_data["reason"]
         title = "Cuenta bloqueada"
@@ -939,7 +1027,7 @@ def driver_payment_block(request, profile_id, action):
     else:
         raise Http404
     driver.updated_at = timezone.now()
-    driver.save(update_fields=["is_active", "blocked_at", "blocked_reason", "updated_at"])
+    driver.save(update_fields=["is_active", "is_blocked", "blocked_at", "blocked_reason", "updated_at"])
     _notify_profile(driver, title, message, "account_status")
     audit(request, action, "profile", message, driver.id)
     messages.success(request, message)
@@ -1176,6 +1264,17 @@ def driver_inbox_detail(request, message_id):
     })
 
 
+@driver_portal_required
+@require_POST
+def driver_inbox_delete(request, message_id):
+    """Elimina del buzón únicamente mensajes pertenecientes al transportista."""
+    driver = _current_driver(request)
+    inbox_message = get_object_or_404(DriverInboxMessage, pk=message_id, driver=driver)
+    inbox_message.delete()
+    messages.success(request, "El mensaje fue eliminado de tu buzón.")
+    return redirect("panel:driver_inbox")
+
+
 @admin_required
 def admin_driver_messages(request):
     form = DriverInboxMessageForm(request.POST or None)
@@ -1227,6 +1326,18 @@ def admin_driver_messages(request):
         "message_type": message_type,
         "types": DriverInboxMessage.TYPE_CHOICES,
     })
+
+
+@admin_required
+@require_POST
+def admin_driver_message_delete(request, message_id):
+    """Borra el registro interno; un correo ya entregado no puede retirarse."""
+    inbox_message = get_object_or_404(DriverInboxMessage.objects.select_related("driver"), pk=message_id)
+    label = inbox_message.title
+    inbox_message.delete()
+    audit(request, "delete", "driver_inbox_message", f"Eliminó el mensaje {label}", message_id)
+    messages.success(request, "Mensaje eliminado del historial y del buzón interno.")
+    return redirect("panel:admin_driver_messages")
 
 
 @xframe_options_sameorigin
@@ -1602,11 +1713,12 @@ def profile_delete(request, kind, profile_id):
 @require_POST
 def profile_toggle(request, kind, profile_id):
     profile = get_object_or_404(_profile_queryset(kind), pk=profile_id)
-    profile.is_active = not profile.is_active
+    profile.is_active = profile.account_blocked
+    profile.is_blocked = not profile.is_active
     profile.blocked_at = None if profile.is_active else timezone.now()
     profile.blocked_reason = None if profile.is_active else request.POST.get("reason", "Bloqueado desde el panel administrativo")
     profile.updated_at = timezone.now()
-    profile.save(update_fields=["is_active", "blocked_at", "blocked_reason", "updated_at"])
+    profile.save(update_fields=["is_active", "is_blocked", "blocked_at", "blocked_reason", "updated_at"])
     cache.delete("movix-dashboard-summary-v2")
     action = "unblock" if profile.is_active else "block"
     audit(request, action, "profile", f"{'Desbloqueó' if profile.is_active else 'Bloqueó'} a {profile.full_name}", profile.id)
@@ -1878,6 +1990,17 @@ def notifications_view(request):
         return redirect("panel:notifications")
     campaigns = NotificationCampaign.objects.all()[:10]
     return render(request, "panel/notifications.html", {"form": form, "campaigns": campaigns})
+
+
+@admin_required
+@require_POST
+def notification_campaign_delete(request, campaign_id):
+    campaign = get_object_or_404(NotificationCampaign, pk=campaign_id)
+    title = campaign.title
+    campaign.delete()
+    audit(request, "delete", "notification_campaign", f"Eliminó campaña {title}", campaign_id)
+    messages.success(request, "La campaña fue eliminada del historial administrativo.")
+    return redirect("panel:notifications")
 
 
 @admin_required

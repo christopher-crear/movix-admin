@@ -45,6 +45,9 @@ class Profile(models.Model):
 
     # Columnas añadidas por sql/supabase_panel.sql.
     is_active = models.BooleanField(default=True)
+    # Estado consumido por la aplicación móvil. Se mantiene sincronizado con
+    # `is_active` mediante la migración SQL 010 y desde las acciones del panel.
+    is_blocked = models.BooleanField(default=False)
     blocked_at = models.DateTimeField(blank=True, null=True)
     blocked_reason = models.TextField(blank=True, null=True)
     identification_photo_url = models.TextField(blank=True, null=True)
@@ -97,11 +100,16 @@ class Profile(models.Model):
 
     @property
     def status_label(self):
-        if not self.is_active:
+        if self.account_blocked:
             return "Bloqueado"
         if self.is_driver and not self.is_available:
             return "No disponible"
         return "Activo"
+
+    @property
+    def account_blocked(self):
+        """Unifica el estado histórico del panel y el usado por la app."""
+        return bool(self.is_blocked or not self.is_active)
 
     @property
     def vehicle_type_label(self):

@@ -101,6 +101,20 @@ class PublicPagesTests(SimpleTestCase):
         self.assertContains(response, "Matrícula vehicular")
         self.assertContains(response, "términos y condiciones")
 
+    def test_google_registration_uses_avatar_and_does_not_require_profile_upload_or_password(self):
+        form = PublicDriverRegistrationForm(
+            google_registration=True,
+            google_avatar_url="https://lh3.googleusercontent.com/photo.jpg",
+            initial={"email": "google@example.com"},
+        )
+        self.assertFalse(form.fields["profile_file"].required)
+        self.assertFalse(form.fields["password"].required)
+        self.assertTrue(form.fields["email"].disabled)
+
+    def test_google_without_avatar_still_requires_profile_upload(self):
+        form = PublicDriverRegistrationForm(google_registration=True, google_avatar_url="")
+        self.assertTrue(form.fields["profile_file"].required)
+
     def test_password_recovery_and_terms_pages_are_public(self):
         recovery = self.client.get(reverse("password_recovery"))
         terms = self.client.get(reverse("terms_and_conditions"))
@@ -510,6 +524,30 @@ class PanelIntegrationTests(TransactionTestCase):
         self.assertRedirects(response, reverse("panel:driver_dashboard"), fetch_redirect_response=False)
         self.assertEqual(self.client.session["portal_role"], "transportista")
 
+    @patch("panel.views.supabase_user_from_token")
+    def test_google_photo_is_copied_to_empty_driver_profile(self, user_from_token):
+        self.client.logout()
+        self.driver_profile.profile_photo_url = ""
+        self.driver_profile.avatar_url = ""
+        self.driver_profile.license_number = "LIC-TEST-2026"
+        self.driver_profile.vehicle_type = "camioneta"
+        self.driver_profile.save(update_fields=[
+            "profile_photo_url", "avatar_url", "license_number", "vehicle_type",
+        ])
+        user_from_token.return_value = {
+            "id": str(self.driver_profile.id),
+            "email": self.driver_profile.email,
+            "app_metadata": {"provider": "google"},
+            "user_metadata": {"avatar_url": "https://lh3.googleusercontent.com/google-avatar.jpg"},
+        }
+        response = self.client.post(
+            reverse("panel:auth_session"),
+            {"access_token": "google-token", "refresh_token": "refresh-token"},
+        )
+        self.assertRedirects(response, reverse("panel:driver_dashboard"), fetch_redirect_response=False)
+        self.driver_profile.refresh_from_db()
+        self.assertEqual(self.driver_profile.profile_photo_url, "https://lh3.googleusercontent.com/google-avatar.jpg")
+
     def test_driver_portal_uses_real_supabase_models(self):
         ride = self._create_driver_ride()
         DriverReview.objects.create(
@@ -587,7 +625,7 @@ class PanelIntegrationTests(TransactionTestCase):
         self.assertFalse(payment.receipt_url)
 
     def test_driver_sees_only_admin_configured_bank_and_mailbox(self):
-        DriverInboxMessage.objects.create(
+        inbox_message = DriverInboxMessage.objects.create(
             driver=self.driver_profile,
             message_type="meeting",
             title="Reunión de transportistas",
@@ -610,6 +648,10 @@ class PanelIntegrationTests(TransactionTestCase):
         self.assertContains(inbox, "Reunión de transportistas")
         self.assertContains(inbox, "Sin leer")
 
+        delete_response = self.client.post(reverse("panel:driver_inbox_delete", args=[inbox_message.id]))
+        self.assertEqual(delete_response.status_code, 302)
+        self.assertFalse(DriverInboxMessage.objects.filter(pk=inbox_message.id).exists())
+
     @patch("panel.views.send_push_notifications", return_value=(0, ""))
     @patch("panel.views.active_tokens_for_users", return_value=[])
     def test_admin_can_block_driver_and_stores_notification_reason(self, _tokens, _push):
@@ -620,6 +662,7 @@ class PanelIntegrationTests(TransactionTestCase):
         self.assertEqual(response.status_code, 302)
         self.driver_profile.refresh_from_db()
         self.assertFalse(self.driver_profile.is_active)
+        self.assertTrue(self.driver_profile.is_blocked)
         self.assertEqual(self.driver_profile.blocked_reason, "Mensualidad pendiente de agosto.")
         self.assertTrue(Notification.objects.filter(user=self.driver_profile, type="account_status", message__icontains="Mensualidad pendiente").exists())
 
@@ -648,6 +691,32 @@ class PanelIntegrationTests(TransactionTestCase):
         messages_view = self.client.get(reverse("panel:admin_driver_messages"))
         self.assertContains(messages_view, "message-center-v12")
         self.assertContains(messages_view, "message-history-panel")
+
+    @patch("panel.views.send_push_notifications", return_value=(0, ""))
+    @patch("panel.views.active_tokens_for_users", return_value=[])
+    @patch("panel.views.send_movix_email", return_value=(True, ""))
+    @patch("panel.views.upload_to_supabase", return_value="storage://movix-documents/monthly-invoices/fisico.pdf")
+    @patch("panel.views.build_monthly_invoice_pdf", return_value=b"factura-fisica")
+    def test_physical_payment_generates_invoice_automatically(
+        self, _build, _upload, _email, _tokens, _push
+    ):
+        response = self.client.post(
+            reverse("panel:monthly_payment_physical", args=[self.driver_profile.id]),
+            {"period": "2026-08", "amount": "30.00"},
+        )
+        payment = DriverMonthlyPayment.objects.get(driver=self.driver_profile)
+        invoice = DriverInvoice.objects.get(payment=payment)
+        self.assertRedirects(
+            response,
+            reverse("panel:monthly_payment_detail", args=[payment.id]),
+            fetch_redirect_response=False,
+        )
+        self.assertEqual(payment.payment_method, "cash")
+        self.assertEqual(payment.amount, Decimal("30.00"))
+        self.assertEqual(invoice.amount, Decimal("30.00"))
+        self.assertTrue(
+            DriverInboxMessage.objects.filter(invoice=invoice, driver=self.driver_profile).exists()
+        )
 
     @patch("panel.views.send_push_notifications", return_value=(0, ""))
     @patch("panel.views.active_tokens_for_users", return_value=[])
@@ -888,6 +957,7 @@ class PanelIntegrationTests(TransactionTestCase):
         self.assertEqual(response.status_code, 302)
         self.user_profile.refresh_from_db()
         self.assertFalse(self.user_profile.is_active)
+        self.assertTrue(self.user_profile.is_blocked)
 
     def test_approve_verification_creates_notification(self):
         url = reverse("panel:verification_update", args=[self.user_profile.id, "approve"])
