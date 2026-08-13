@@ -1,9 +1,64 @@
 {% extends 'base.html' %}
 {% block title %}Notificaciones{% endblock %}
 {% block content %}
-<div class="page-heading"><div><h1>Notificaciones</h1><p>Envía mensajes internos y push a los usuarios de la app</p></div></div>
+<div class="page-heading"><div><h1>Notificaciones</h1>
+    <p>Envía notificaciones internas y generales a los usuarios de la app</p>
+</div>
+</div>
 <div class="notification-layout">
-    <section class="card form-card"><h2>Enviar notificación</h2><p>Siempre se guarda dentro de la app. Si configuraste Firebase y existen tokens, también se envía como push.</p><form method="post" class="stack-form" id="notificationForm">{% csrf_token %}{{ form.non_field_errors }}{% for field in form %}<div class="field {% if field.name == 'recipient' %}recipient-field{% endif %}" data-recipient-field>{{ field.label_tag }}{{ field }}{{ field.errors }}{% if field.name == 'message' %}<small class="char-counter"><span data-char-count>0</span>/500</small>{% endif %}</div>{% endfor %}<button class="btn btn-primary btn-lg btn-block" type="submit"><svg><use href="#i-bell"/></svg> Enviar notificación</button></form></section>
-    <aside class="card recent-campaigns"><h2>Enviadas recientemente</h2><p>Historial de campañas</p>{% for campaign in campaigns %}<article><div><span class="pill">{% if campaign.audience == 'all' %}Todos{% elif campaign.audience == 'clients' %}Clientes{% elif campaign.audience == 'drivers' %}Transportistas{% else %}Un usuario{% endif %}</span><span class="campaign-head-actions"><time>{{ campaign.created_at|timesince }} atrás</time><form method="post" action="{% url 'panel:notification_campaign_delete' campaign.id %}" onsubmit="return confirm('¿Eliminar esta campaña del historial?')">{% csrf_token %}<button class="icon-action danger" type="submit" title="Eliminar" aria-label="Eliminar campaña"><svg><use href="#i-trash"/></svg></button></form></span></div><strong>{{ campaign.title }}</strong><p>{{ campaign.message }}</p><footer><span class="pill {% if campaign.status == 'delivered' %}pill-green{% else %}pill-blue{% endif %}">{{ campaign.total_recipients }} guardadas</span><small>{{ campaign.push_sent }} push</small></footer>{% if campaign.error_message %}<details><summary>Detalle técnico</summary><small>{{ campaign.error_message }}</small></details>{% endif %}</article>{% empty %}<div class="empty-state">Aún no se han enviado campañas.</div>{% endfor %}</aside>
+    <section class="card form-card">
+        <h2>Enviar notificación</h2>
+        <p>Envia notificaciones a tus usuarios y transportistas de  Movix.</p>
+        <form method="post" class="stack-form" id="notificationForm">
+            {% csrf_token %}{{ form.non_field_errors }}{% for field in form %}
+            <div class="field {% if field.name == 'recipient' %}recipient-field{% endif %}" data-recipient-field>
+                {{ field.label_tag }}{{ field }}{{ field.errors }}{% if field.name == 'message' %}
+                <small class="char-counter">
+                    <span data-char-count>0</span>/500
+                </small>
+                {% endif %}
+            </div>
+            {% endfor %}
+            <button class="btn btn-primary btn-lg btn-block" type="submit">
+                <svg><use href="#i-bell"/></svg> Enviar notificación
+            </button>
+        </form>
+    </section>
+    <aside class="card recent-campaigns">
+        <h2>Enviadas recientemente</h2>
+        <p>Historial de campañas</p>
+        {% for campaign in campaigns %}
+        <article>
+            <div>
+                <span class="pill">
+                    {% if campaign.audience == 'all' %}
+                    Todos{% elif campaign.audience == 'clients' %}
+                    Clientes{% elif campaign.audience == 'drivers' %}
+                    Transportistas{% else %}Un usuario{% endif %}
+                </span>
+                <span class="campaign-head-actions">
+                    <time>{{ campaign.created_at|timesince }} atrás</time>
+                    <form method="post" 
+                    action="{% url 'panel:notification_campaign_delete' campaign.id %}" 
+                    onsubmit="return confirm('¿Eliminar esta campaña del historial?')">
+                    {% csrf_token %}
+                    <button class="icon-action danger" type="submit" title="Eliminar" aria-label="Eliminar campaña">
+                        <svg><use href="#i-trash"/></svg>
+                    </button>
+                </form>
+            </span>
+        </div><strong>{{ campaign.title }}</strong>
+        <p>{{ campaign.message }}</p>
+        <footer>
+            <span class="pill {% if campaign.status == 'delivered' %}pill-green{% else %}pill-blue{% endif %}">
+                {{ campaign.total_recipients }} guardadas</span>
+                <small>{{ campaign.push_sent }} push</small>
+            </footer>
+            {% if campaign.error_message %}
+            
+            {% endif %}</article>{% empty %}
+            <div class="empty-state">Aún no se han enviado notificaciones.</div>
+            {% endfor %}
+        </aside>
 </div>
 {% endblock %}
