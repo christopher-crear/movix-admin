@@ -223,8 +223,13 @@
   const rawData = document.getElementById('dashboard-data');
   if (rawData) {
     let data = JSON.parse(rawData.textContent); if (typeof data === 'string') data = JSON.parse(data);
-    drawLineChart(document.getElementById('growthChart'), data.labels, [data.clients, data.drivers], ['#27aef3', '#7b55ec']);
-    drawBarChart(document.getElementById('ridesChart'), data.labels, data.rides, '#8355ed');
+    const renderDashboardCharts = () => {
+      drawLineChart(document.getElementById('growthChart'), data.labels, [data.clients, data.drivers], ['Usuarios', 'Transportistas']);
+      drawBarChart(document.getElementById('ridesChart'), data.labels, data.rides, '#2864ef');
+    };
+    renderDashboardCharts();
+    let resizeTimer;
+    window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(renderDashboardCharts, 140); });
   }
 
   function setupCanvas(canvas) {
@@ -233,15 +238,39 @@
   }
   function drawGrid(ctx, width, height, max, labels) {
     ctx.font = '12px system-ui'; ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--border'); ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--muted'); ctx.lineWidth = 1;
-    for (let i=0;i<5;i++){const y=18+(height-55)*i/4;ctx.beginPath();ctx.moveTo(35,y);ctx.lineTo(width-10,y);ctx.stroke();ctx.fillText(String(Math.round(max*(4-i)/4)),2,y+4)}
-    labels.forEach((label,i)=>{const x=45+(width-70)*i/Math.max(1,labels.length-1);ctx.fillText(label,x-10,height-10)});
+    for (let i=0;i<5;i++){const y=18+(height-62)*i/4;ctx.beginPath();ctx.moveTo(40,y);ctx.lineTo(width-10,y);ctx.stroke();ctx.fillText(String(Math.round(max*(4-i)/4)),3,y+4)}
+    labels.forEach((label,i)=>{const x=48+(width-78)*i/Math.max(1,labels.length-1);ctx.fillText(label,x-12,height-12)});
   }
-  function drawLineChart(canvas, labels, series, colors) {
-    const setup=setupCanvas(canvas); if(!setup)return; const {ctx,width,height}=setup; const max=Math.max(5,...series.flat())*1.15; drawGrid(ctx,width,height,max,labels);
-    series.forEach((values,s)=>{ctx.strokeStyle=colors[s];ctx.lineWidth=3;ctx.beginPath();values.forEach((v,i)=>{const x=45+(width-70)*i/Math.max(1,values.length-1);const y=18+(height-55)*(1-v/max);i?ctx.lineTo(x,y):ctx.moveTo(x,y)});ctx.stroke();values.forEach((v,i)=>{const x=45+(width-70)*i/Math.max(1,values.length-1);const y=18+(height-55)*(1-v/max);ctx.fillStyle=colors[s];ctx.beginPath();ctx.arc(x,y,4,0,Math.PI*2);ctx.fill()})});
+  function attachChartTooltip(canvas, regions) {
+    if (!canvas) return;
+    canvas._movixRegions = regions;
+    if (canvas.dataset.tooltipReady) return;
+    canvas.dataset.tooltipReady = '1';
+    const tooltip = document.createElement('div'); tooltip.className = 'chart-tooltip'; tooltip.hidden = true; document.body.appendChild(tooltip);
+    canvas.addEventListener('mousemove', event => {
+      const rect = canvas.getBoundingClientRect(); const x = event.clientX - rect.left; const y = event.clientY - rect.top;
+      const hit = (canvas._movixRegions || []).find(point => Math.hypot(point.x-x, point.y-y) < (point.radius || 15));
+      if (!hit) { tooltip.hidden = true; return; }
+      tooltip.innerHTML = `<strong>${escapeHtml(hit.label)}</strong>${escapeHtml(hit.detail)}`;
+      tooltip.style.left = `${event.clientX}px`; tooltip.style.top = `${event.clientY}px`; tooltip.hidden = false;
+    });
+    canvas.addEventListener('mouseleave', () => { tooltip.hidden = true; });
+  }
+  function drawLineChart(canvas, labels, series, names) {
+    const setup=setupCanvas(canvas); if(!setup)return; const {ctx,width,height}=setup; const max=Math.max(5,...series.flat())*1.18; drawGrid(ctx,width,height,max,labels); const regions=[];
+    const colors=['#18cdb7','#2356d8'];
+    series.forEach((values,s)=>{
+      const points=values.map((v,i)=>({x:48+(width-78)*i/Math.max(1,values.length-1),y:18+(height-62)*(1-v/max),v}));
+      if(s===0 && points.length){const gradient=ctx.createLinearGradient(0,18,0,height-36);gradient.addColorStop(0,'rgba(35,86,216,.55)');gradient.addColorStop(.48,'rgba(40,158,237,.35)');gradient.addColorStop(1,'rgba(24,205,183,.08)');ctx.beginPath();ctx.moveTo(points[0].x,height-36);points.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.lineTo(p.x,p.y));ctx.lineTo(points.at(-1).x,height-36);ctx.closePath();ctx.fillStyle=gradient;ctx.fill()}
+      ctx.strokeStyle=colors[s];ctx.lineWidth=s?3:4;ctx.lineJoin='round';ctx.beginPath();points.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.stroke();
+      points.forEach((p,i)=>{ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(p.x,p.y,6,0,Math.PI*2);ctx.fill();ctx.strokeStyle=colors[s];ctx.lineWidth=3;ctx.stroke();regions.push({x:p.x,y:p.y,radius:16,label:labels[i],detail:`${names[s]}: ${p.v}`})});
+    });
+    attachChartTooltip(canvas,regions);
   }
   function drawBarChart(canvas, labels, values, color) {
-    const setup=setupCanvas(canvas); if(!setup)return; const {ctx,width,height}=setup; const max=Math.max(5,...values)*1.15; drawGrid(ctx,width,height,max,labels); const step=(width-70)/Math.max(1,values.length); const bar=Math.min(32,step*.55);
-    values.forEach((v,i)=>{const x=43+i*step+(step-bar)/2;const h=(height-55)*v/max;const y=height-37-h;ctx.fillStyle=color;ctx.beginPath();ctx.roundRect(x,y,bar,h,6);ctx.fill()});
+    const setup=setupCanvas(canvas); if(!setup)return; const {ctx,width,height}=setup; const max=Math.max(5,...values)*1.15; drawGrid(ctx,width,height,max,labels); const step=(width-78)/Math.max(1,values.length); const bar=Math.min(36,step*.58);const regions=[];
+    const gradient=ctx.createLinearGradient(0,18,0,height-36);gradient.addColorStop(0,color);gradient.addColorStop(1,'#2dc9d0');
+    values.forEach((v,i)=>{const x=43+i*step+(step-bar)/2;const h=(height-62)*v/max;const y=height-38-h;ctx.fillStyle=gradient;ctx.beginPath();ctx.roundRect(x,y,bar,Math.max(h,2),8);ctx.fill();regions.push({x:x+bar/2,y:y+Math.max(h,2)/2,radius:Math.max(18,h/2),label:labels[i],detail:`Carreras completadas: ${v}`})});
+    attachChartTooltip(canvas,regions);
   }
 })();

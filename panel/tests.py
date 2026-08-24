@@ -33,11 +33,14 @@ from .models import (
     DriverInboxMessage,
     DriverInvoice,
     DriverReview,
+    FleetDriver,
+    FleetVehicle,
     Notification,
     NotificationCampaign,
     PaymentBankAccount,
     Profile,
     Ride,
+    RideStop,
     SystemSetting,
 )
 from .services import is_safe_media_url, resolve_media_url, send_movix_email, upload_to_supabase
@@ -46,6 +49,9 @@ from .services import is_safe_media_url, resolve_media_url, send_movix_email, up
 EXTERNAL_MODELS = [
     Profile,
     Ride,
+    RideStop,
+    FleetVehicle,
+    FleetDriver,
     DriverReview,
     Notification,
     DriverMonthlyPayment,
@@ -391,6 +397,24 @@ class PanelIntegrationTests(TransactionTestCase):
         }
         values.update(overrides)
         return Ride.objects.create(**values)
+
+    def test_movix_rank_and_duration_format(self):
+        self.driver_profile.rating = Decimal("4.80")
+        self.driver_profile.completed_trips = 120
+        self.assertEqual(self.driver_profile.movix_rank["label"], "Estrella MOVIX")
+        ride = self._create_driver_ride(estimated_minutes=135)
+        self.assertEqual(ride.estimated_duration_label, "2 h 15 min")
+
+    def test_driver_sees_multipoint_route_earnings_and_fleet_modules(self):
+        ride = self._create_driver_ride(estimated_minutes=75)
+        RideStop.objects.create(id=uuid.uuid4(), ride=ride, stop_type="pickup", sequence=1, address="Bodega norte", created_at=timezone.now())
+        RideStop.objects.create(id=uuid.uuid4(), ride=ride, stop_type="delivery", sequence=2, address="Entrega sur", created_at=timezone.now())
+        self._open_driver_session()
+        detail = self.client.get(reverse("panel:driver_ride_detail", args=[ride.id]))
+        self.assertContains(detail, "Bodega norte")
+        self.assertContains(detail, "1 h 15 min")
+        self.assertEqual(self.client.get(reverse("panel:driver_earnings")).status_code, 200)
+        self.assertEqual(self.client.get(reverse("panel:driver_fleet")).status_code, 200)
 
     @patch("panel.views.send_movix_email")
     def test_driver_password_recovery_sends_custom_movix_link(self, send_email):

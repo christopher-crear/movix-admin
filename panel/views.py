@@ -38,6 +38,8 @@ from .forms import (
     DriverInboxMessageForm,
     DriverMonthlyPaymentForm,
     DriverSelfProfileForm,
+    FleetDriverForm,
+    FleetVehicleForm,
     NotificationForm,
     PaymentBankAccountForm,
     PublicContactForm,
@@ -58,11 +60,14 @@ from .models import (
     DriverInvoice,
     DriverMonthlyPayment,
     DriverReview,
+    FleetDriver,
+    FleetVehicle,
     Notification,
     NotificationCampaign,
     PaymentBankAccount,
     Profile,
     Ride,
+    RideStop,
     SystemSetting,
 )
 from .services import (
@@ -153,12 +158,14 @@ def landing(request):
             cache.set(rate_key, attempts + 1, 600)
             cache.delete("movix-new-contact-count")
             return redirect(f"{reverse('panel:landing')}?enviado=1#contacto")
+    general_value = cache.get("movix-system-settings") or {}
     return render(
         request,
         "landing.html",
         {
             "contact_form": form,
-            "support_email": settings.MOVIX_SUPPORT_EMAIL,
+            "support_email": general_value.get("support_email") or settings.MOVIX_SUPPORT_EMAIL,
+            "app_name": general_value.get("app_name") or "MOVIX",
             "whatsapp_number": settings.MOVIX_WHATSAPP_NUMBER,
             "whatsapp_display": settings.MOVIX_WHATSAPP_DISPLAY,
             "facebook_url": settings.MOVIX_FACEBOOK_URL,
@@ -572,7 +579,25 @@ def _driver_common_context(driver):
             expires=900,
             preferred_buckets=(settings.SUPABASE_PUBLIC_BUCKET, settings.SUPABASE_PRIVATE_BUCKET),
         ) if avatar_value else "",
+        "movix_rank": driver.movix_rank,
     }
+
+
+def _earnings_period(completed, period, anchor=None):
+    today = anchor or timezone.localdate()
+    if period == "day":
+        return completed.filter(completed_at__date=today), today, today
+    if period == "month":
+        start = today.replace(day=1)
+        next_month = (start.replace(day=28) + timedelta(days=4)).replace(day=1)
+        return completed.filter(completed_at__date__gte=start, completed_at__date__lt=next_month), start, next_month - timedelta(days=1)
+    if period == "year":
+        start = today.replace(month=1, day=1)
+        end = today.replace(month=12, day=31)
+        return completed.filter(completed_at__date__gte=start, completed_at__date__lte=end), start, end
+    start = today - timedelta(days=today.weekday())
+    end = start + timedelta(days=6)
+    return completed.filter(completed_at__date__gte=start, completed_at__date__lte=end), start, end
 
 
 @driver_portal_required
@@ -652,6 +677,15 @@ def driver_ride_detail(request, ride_id):
     ride = get_object_or_404(Ride.objects.select_related("client"), pk=ride_id, driver=driver)
     review = DriverReview.objects.filter(ride=ride, driver=driver).select_related("client").first()
     client_photo = ride.client.profile_photo_url or ride.client.avatar_url
+    try:
+        stops = list(RideStop.objects.filter(ride=ride))
+    except DatabaseError:
+        stops = []
+    if not stops:
+        stops = [
+            {"type_label": "Recogida", "sequence": 1, "address": ride.origin_address, "contact_name": "", "contact_phone": "", "notes": ""},
+            {"type_label": "Entrega", "sequence": 1, "address": ride.destination_address, "contact_name": "", "contact_phone": "", "notes": ""},
+        ]
     context = {
         **_driver_common_context(driver),
         "ride": ride,
@@ -661,6 +695,8 @@ def driver_ride_detail(request, ride_id):
             expires=900,
             preferred_buckets=(settings.SUPABASE_PUBLIC_BUCKET, settings.SUPABASE_PRIVATE_BUCKET),
         ) if client_photo else "",
+        "stops": stops,
+        "client_low_rating": ride.client.low_rating_alert,
     }
     return render(request, "driver/ride_detail.html", context)
 
@@ -740,6 +776,79 @@ def driver_profile(request):
         "documents": _profile_document_items(driver),
     }
     return render(request, "driver/profile.html", context)
+
+
+@driver_portal_required
+def driver_earnings(request):
+    driver = _current_driver(request)
+    period = request.GET.get("period", "week")
+    if period not in {"day", "week", "month", "year"}:
+        period = "week"
+    completed = Ride.objects.filter(driver=driver, status__in=COMPLETED_RIDE_STATUSES).select_related("client").order_by("-completed_at")
+    selected, start, end = _earnings_period(completed, period)
+    vehicle_id = request.GET.get("vehicle", "")
+    # Las carreras históricas sin fleet_vehicle_id siguen incluyéndose en el total general.
+    if vehicle_id:
+        selected = selected.filter(fleet_vehicle_id=vehicle_id)
+    totals = selected.aggregate(total=Sum(Coalesce("driver_price", "price")), distance=Sum("distance_km"), trips=Count("id"))
+    if request.GET.get("export") == "csv":
+        response = HttpResponse(content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = f'attachment; filename="ganancias_movix_{period}_{start}.csv"'
+        response.write("\ufeff")
+        writer = csv.writer(response)
+        writer.writerow(["Fecha", "Carrera", "Cliente", "Origen", "Destino", "Distancia km", "Ganancia USD"])
+        for ride in selected:
+            writer.writerow([ride.completed_at, ride.id, ride.client.full_name, ride.origin_address, ride.destination_address, ride.distance_km or 0, ride.effective_price])
+        return response
+    try:
+        vehicles = FleetVehicle.objects.filter(owner=driver)
+    except DatabaseError:
+        vehicles = []
+    return render(request, "driver/earnings.html", {
+        **_driver_common_context(driver), "period": period, "start": start, "end": end,
+        "rides": selected, "total": totals["total"] or Decimal("0"), "trip_count": totals["trips"] or 0,
+        "distance": totals["distance"] or Decimal("0"), "vehicles": vehicles, "vehicle_id": vehicle_id,
+    })
+
+
+@driver_portal_required
+def driver_fleet(request):
+    owner = _current_driver(request)
+    action = request.POST.get("action", "")
+    vehicle_form = FleetVehicleForm(request.POST if action == "vehicle" else None)
+    driver_form = FleetDriverForm(request.POST if action == "driver" else None, owner=owner)
+    try:
+        if request.method == "POST" and action == "vehicle" and vehicle_form.is_valid():
+            vehicle = vehicle_form.save(commit=False)
+            vehicle.id, vehicle.owner = uuid.uuid4(), owner
+            vehicle.created_at = vehicle.updated_at = timezone.now()
+            vehicle.save(force_insert=True)
+            messages.success(request, "Vehículo agregado a tu flota.")
+            return redirect("panel:driver_fleet")
+        if request.method == "POST" and action == "driver" and driver_form.is_valid():
+            fleet_driver = driver_form.save(commit=False)
+            fleet_driver.id, fleet_driver.owner = uuid.uuid4(), owner
+            fleet_driver.created_at = fleet_driver.updated_at = timezone.now()
+            fleet_driver.save(force_insert=True)
+            messages.success(request, "Perfil de chofer creado correctamente.")
+            return redirect("panel:driver_fleet")
+        if request.method == "POST" and action in {"toggle_vehicle", "toggle_driver"}:
+            model = FleetVehicle if action == "toggle_vehicle" else FleetDriver
+            item = get_object_or_404(model, pk=request.POST.get("id"), owner=owner)
+            item.is_active = not item.is_active
+            item.updated_at = timezone.now()
+            item.save(update_fields=["is_active", "updated_at"])
+            messages.success(request, "Estado actualizado.")
+            return redirect("panel:driver_fleet")
+        vehicles = FleetVehicle.objects.filter(owner=owner)
+        drivers = FleetDriver.objects.filter(owner=owner).select_related("vehicle")
+    except DatabaseError as exc:
+        vehicles, drivers = [], []
+        vehicle_form.add_error(None, "Ejecuta primero sql/020_movix_routes_ranks_fleet.sql en Supabase.")
+    return render(request, "driver/fleet.html", {
+        **_driver_common_context(owner), "vehicles": vehicles, "fleet_drivers": drivers,
+        "vehicle_form": vehicle_form, "driver_form": driver_form,
+    })
 
 
 @driver_portal_required
@@ -1599,7 +1708,10 @@ def profile_list(request, kind):
 def profile_detail(request, kind, profile_id):
     config = _kind_config(kind)
     profile = get_object_or_404(_profile_queryset(kind), pk=profile_id)
-    reviews = DriverReview.objects.filter(driver=profile).select_related("client")[:8] if kind == "drivers" else DriverReview.objects.filter(client=profile).select_related("driver")[:8]
+    review_queryset = DriverReview.objects.filter(driver=profile).select_related("client") if kind == "drivers" else DriverReview.objects.filter(client=profile).select_related("driver")
+    review_count = review_queryset.count()
+    show_all_reviews = request.GET.get("reviews") == "all"
+    reviews = review_queryset if show_all_reviews else review_queryset[:4]
     ride_count = Ride.objects.filter(driver=profile).count() if kind == "drivers" else Ride.objects.filter(client=profile).count()
     summary_keys = ("identification", "vehicle") if profile.is_driver else ("identification",)
     return render(request, "panel/profile_detail.html", {
@@ -1607,6 +1719,10 @@ def profile_detail(request, kind, profile_id):
         "config": config,
         "profile": profile,
         "reviews": reviews,
+        "review_count": review_count,
+        "show_all_reviews": show_all_reviews,
+        "has_more_reviews": review_count > 4,
+        "movix_rank": profile.movix_rank,
         "ride_count": ride_count,
         "summary_documents": _profile_document_items(profile, summary_keys),
     })
@@ -1960,7 +2076,13 @@ def monthly_payment_receipt(request, payment_id, action="view"):
 @admin_required
 def notifications_view(request):
     form = NotificationForm(request.POST or None)
+    general_setting = SystemSetting.objects.filter(pk="general").first()
+    notifications_enabled = not general_setting or not isinstance(general_setting.value, dict) or general_setting.value.get("notifications_enabled", True)
     if request.method == "POST" and form.is_valid():
+        if not notifications_enabled:
+            form.add_error(None, "El envío de notificaciones está desactivado en Configuración.")
+            campaigns = NotificationCampaign.objects.all()[:10]
+            return render(request, "panel/notifications.html", {"form": form, "campaigns": campaigns, "notifications_enabled": False})
         audience = form.cleaned_data["audience"]
         if audience == "specific":
             recipients = Profile.objects.filter(pk=form.cleaned_data["recipient"].pk, is_active=True)
@@ -1989,7 +2111,7 @@ def notifications_view(request):
         messages.success(request, f"Notificación guardada para {len(recipient_ids)} destinatarios. Push enviados: {push_sent}.")
         return redirect("panel:notifications")
     campaigns = NotificationCampaign.objects.all()[:10]
-    return render(request, "panel/notifications.html", {"form": form, "campaigns": campaigns})
+    return render(request, "panel/notifications.html", {"form": form, "campaigns": campaigns, "notifications_enabled": notifications_enabled})
 
 
 @admin_required
@@ -2136,6 +2258,7 @@ def settings_view(request):
             key="general",
             defaults={"value": value, "updated_by": request.user.username, "updated_at": timezone.now()},
         )
+        cache.set("movix-system-settings", value, None)
         audit(request, "update", "settings", "Actualizó la configuración general")
         messages.success(request, "Configuración guardada.")
         response = redirect("panel:settings")

@@ -9,6 +9,8 @@ from .models import (
     ContactRequest,
     DriverInboxMessage,
     DriverMonthlyPayment,
+    FleetDriver,
+    FleetVehicle,
     PaymentBankAccount,
     Profile,
 )
@@ -54,6 +56,9 @@ class ProfileForm(StyledFormMixin, forms.ModelForm):
             "vehicle_year",
             "vehicle_type",
             "experience_years",
+            "permit_number",
+            "permit_details",
+            "company_name",
             "is_available",
         ]
         labels = {
@@ -68,6 +73,9 @@ class ProfileForm(StyledFormMixin, forms.ModelForm):
             "vehicle_year": "Año del vehículo",
             "vehicle_type": "Tipo de vehículo",
             "experience_years": "Años de experiencia",
+            "permit_number": "Número de permiso de operación",
+            "permit_details": "Datos adicionales del permiso",
+            "company_name": "Compañía para la que trabaja",
             "is_available": "Disponible para servicios",
         }
         widgets = {
@@ -82,6 +90,9 @@ class ProfileForm(StyledFormMixin, forms.ModelForm):
             "vehicle_year": forms.NumberInput(attrs={"min": 1950, "max": 2100, "inputmode": "numeric"}),
             "vehicle_type": forms.Select(choices=VEHICLE_TYPE_CHOICES),
             "experience_years": forms.NumberInput(attrs={"min": 0, "max": 80, "inputmode": "numeric"}),
+            "permit_number": forms.TextInput(attrs={"maxlength": 80}),
+            "permit_details": forms.Textarea(attrs={"rows": 3, "maxlength": 500}),
+            "company_name": forms.TextInput(attrs={"maxlength": 160}),
         }
 
     def __init__(self, *args, role="cliente", **kwargs):
@@ -95,6 +106,9 @@ class ProfileForm(StyledFormMixin, forms.ModelForm):
                 "vehicle_year",
                 "vehicle_type",
                 "experience_years",
+                "permit_number",
+                "permit_details",
+                "company_name",
                 "is_available",
                 "vehicle_file",
                 "license_file",
@@ -266,6 +280,53 @@ class DriverSelfProfileForm(ProfileForm):
         self.fields.pop("identification_number", None)
         # El archivo de la cédula sí puede renovarse desde el portal. El número
         # permanece protegido para evitar cambiar la identidad de la cuenta.
+
+
+class FleetVehicleForm(StyledFormMixin, forms.ModelForm):
+    class Meta:
+        model = FleetVehicle
+        fields = ["alias", "plate", "vehicle_type", "year", "load_capacity", "permit_number", "is_active"]
+        labels = {
+            "alias": "Nombre para identificarlo",
+            "plate": "Placa",
+            "vehicle_type": "Tipo de vehículo",
+            "year": "Año",
+            "load_capacity": "Capacidad (kg)",
+            "permit_number": "Permiso de operación",
+            "is_active": "Vehículo activo",
+        }
+        widgets = {
+            "vehicle_type": forms.Select(choices=VEHICLE_TYPE_CHOICES),
+            "year": forms.NumberInput(attrs={"min": 1950, "max": 2100}),
+            "load_capacity": forms.NumberInput(attrs={"min": 0, "step": "0.01"}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.apply_styles()
+
+
+class FleetDriverForm(StyledFormMixin, forms.ModelForm):
+    class Meta:
+        model = FleetDriver
+        fields = ["first_name", "last_name", "identification_number", "license_number", "phone", "email", "vehicle", "is_active"]
+        labels = {
+            "first_name": "Nombres", "last_name": "Apellidos", "identification_number": "Cédula",
+            "license_number": "Licencia", "phone": "Teléfono", "email": "Correo",
+            "vehicle": "Vehículo asignado", "is_active": "Chofer activo",
+        }
+
+    def __init__(self, *args, owner=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if owner:
+            self.fields["vehicle"].queryset = FleetVehicle.objects.filter(owner=owner, is_active=True)
+        self.apply_styles()
+
+    def clean_identification_number(self):
+        value = (self.cleaned_data.get("identification_number") or "").strip()
+        if not value.isdigit() or len(value) != 10:
+            raise forms.ValidationError("La cédula debe contener exactamente 10 dígitos.")
+        return value
 
 
 class DriverMonthlyPaymentForm(StyledFormMixin, forms.ModelForm):

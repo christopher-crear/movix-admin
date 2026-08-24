@@ -27,6 +27,14 @@ ALLOWED_MIME_TYPES = {
 }
 
 
+def configured_upload_limit_mb():
+    cached = cache.get("movix-system-settings") or {}
+    try:
+        return max(1, min(50, int(cached.get("max_upload_mb", settings.MAX_UPLOAD_MB))))
+    except (TypeError, ValueError):
+        return settings.MAX_UPLOAD_MB
+
+
 def _supabase_headers(content_type=None):
     if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_ROLE_KEY:
         raise ValidationError("Configura SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY en el archivo .env.")
@@ -161,7 +169,7 @@ def ensure_storage_bucket(bucket, public=False, images_only=False):
                     "id": bucket,
                     "name": bucket,
                     "public": public,
-                    "file_size_limit": settings.MAX_UPLOAD_MB * 1024 * 1024,
+                    "file_size_limit": configured_upload_limit_mb() * 1024 * 1024,
                     "allowed_mime_types": allowed,
                 },
                 timeout=(8, 25),
@@ -176,11 +184,12 @@ def ensure_storage_bucket(bucket, public=False, images_only=False):
 
 
 def validate_upload(uploaded_file, images_only=False):
-    limit = settings.MAX_UPLOAD_MB * 1024 * 1024
+    limit_mb = configured_upload_limit_mb()
+    limit = limit_mb * 1024 * 1024
     content_type = uploaded_file.content_type or mimetypes.guess_type(uploaded_file.name)[0]
     allowed = {"image/jpeg", "image/png", "image/webp"} if images_only else ALLOWED_MIME_TYPES
     if uploaded_file.size > limit:
-        raise ValidationError(f"El archivo supera el máximo de {settings.MAX_UPLOAD_MB} MB.")
+        raise ValidationError(f"El archivo supera el máximo de {limit_mb} MB.")
     if content_type not in allowed:
         raise ValidationError("Formato no permitido. Usa PNG, JPG, WEBP o PDF.")
     return content_type

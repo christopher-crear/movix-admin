@@ -53,6 +53,9 @@ class Profile(models.Model):
     identification_photo_url = models.TextField(blank=True, null=True)
     verification_status = models.TextField(default="pending")
     verification_rejection_reason = models.TextField(blank=True, null=True)
+    permit_number = models.TextField(blank=True, null=True)
+    permit_details = models.TextField(blank=True, null=True)
+    company_name = models.TextField(blank=True, null=True)
 
     class Meta:
         managed = False
@@ -124,6 +127,21 @@ class Profile(models.Model):
             "camión mediano": "Camión mediano",
         }.get(value.lower(), value or "Vehículo sin especificar")
 
+    @property
+    def movix_rank(self):
+        """Rango común para clientes y transportistas, calculado sin duplicar datos."""
+        rating = float(self.rating or 0)
+        trips = int(self.completed_trips or 0)
+        if rating >= 4.7 and trips >= 100:
+            return {"key": "star", "label": "Estrella MOVIX", "icon": "★", "next": None}
+        if rating >= 4.3 and trips >= 40:
+            return {"key": "pro", "label": "MOVIX Pro", "icon": "◆", "next": "Estrella MOVIX"}
+        return {"key": "start", "label": "MOVIX Inicial", "icon": "●", "next": "MOVIX Pro"}
+
+    @property
+    def low_rating_alert(self):
+        return not self.is_driver and float(self.rating or 0) < 3
+
     def __str__(self):
         return self.full_name
 
@@ -132,6 +150,8 @@ class Ride(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4)
     client = models.ForeignKey(Profile, models.DO_NOTHING, db_column="client_id", related_name="requested_rides")
     driver = models.ForeignKey(Profile, models.DO_NOTHING, db_column="driver_id", related_name="assigned_rides", blank=True, null=True)
+    fleet_vehicle = models.ForeignKey("FleetVehicle", models.SET_NULL, db_column="fleet_vehicle_id", related_name="rides", blank=True, null=True, db_constraint=False)
+    fleet_driver = models.ForeignKey("FleetDriver", models.SET_NULL, db_column="fleet_driver_id", related_name="rides", blank=True, null=True, db_constraint=False)
     service_type = models.TextField(default="transporte")
     origin_address = models.TextField()
     destination_address = models.TextField()
@@ -194,6 +214,90 @@ class Ride(models.Model):
     @property
     def is_cancelled(self):
         return (self.status or "").lower() in {"cancelada", "cancelado", "cancelled", "canceled"}
+
+    @property
+    def estimated_duration_label(self):
+        if self.estimated_minutes is None:
+            return "—"
+        hours, minutes = divmod(max(0, int(self.estimated_minutes)), 60)
+        if hours and minutes:
+            return f"{hours} h {minutes} min"
+        if hours:
+            return f"{hours} h"
+        return f"{minutes} min"
+
+
+class RideStop(models.Model):
+    """Puntos ordenados compartidos con la app móvil para encomiendas multipunto."""
+    TYPE_PICKUP = "pickup"
+    TYPE_DELIVERY = "delivery"
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    ride = models.ForeignKey(Ride, models.DO_NOTHING, db_column="ride_id", related_name="stops")
+    stop_type = models.TextField()
+    sequence = models.PositiveIntegerField(default=1)
+    address = models.TextField()
+    latitude = models.FloatField(blank=True, null=True)
+    longitude = models.FloatField(blank=True, null=True)
+    contact_name = models.TextField(blank=True, null=True)
+    contact_phone = models.TextField(blank=True, null=True)
+    notes = models.TextField(blank=True, null=True)
+    status = models.TextField(default="pending")
+    arrived_at = models.DateTimeField(blank=True, null=True)
+    completed_at = models.DateTimeField(blank=True, null=True)
+    created_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        managed = False
+        db_table = "ride_stops"
+        ordering = ["sequence", "created_at"]
+
+    @property
+    def type_label(self):
+        return "Recogida" if self.stop_type == self.TYPE_PICKUP else "Entrega"
+
+
+class FleetVehicle(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    owner = models.ForeignKey(Profile, models.DO_NOTHING, db_column="owner_id", related_name="fleet_vehicles")
+    plate = models.TextField()
+    vehicle_type = models.TextField()
+    year = models.IntegerField(blank=True, null=True)
+    load_capacity = models.DecimalField(max_digits=12, decimal_places=2, blank=True, null=True)
+    alias = models.TextField(blank=True, null=True)
+    permit_number = models.TextField(blank=True, null=True)
+    photo_url = models.TextField(blank=True, null=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(blank=True, null=True)
+    updated_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        managed = False
+        db_table = "fleet_vehicles"
+        ordering = ["plate"]
+
+
+class FleetDriver(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    owner = models.ForeignKey(Profile, models.DO_NOTHING, db_column="owner_id", related_name="fleet_drivers")
+    vehicle = models.ForeignKey(FleetVehicle, models.DO_NOTHING, db_column="vehicle_id", blank=True, null=True, related_name="drivers")
+    first_name = models.TextField()
+    last_name = models.TextField()
+    identification_number = models.TextField()
+    license_number = models.TextField()
+    phone = models.TextField(blank=True, null=True)
+    email = models.TextField(blank=True, null=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(blank=True, null=True)
+    updated_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        managed = False
+        db_table = "fleet_drivers"
+        ordering = ["first_name", "last_name"]
+
+    @property
+    def full_name(self):
+        return f"{self.first_name} {self.last_name}".strip()
 
 
 class DriverReview(models.Model):

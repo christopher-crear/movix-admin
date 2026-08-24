@@ -23,7 +23,11 @@ El sistema utiliza las tablas existentes de la app móvil (`profiles`, `rides`, 
 - Recuperación de contraseña por correo con enlace firmado de 30 minutos y formulario MOVIX para confirmar la nueva clave.
 - Administradores mediante cuenta Django con `is_staff=True`.
 - Transportistas mediante correo/contraseña de Supabase Auth o Google.
-- Portal privado del transportista con ganancias semanales y diarias, viajes, distancia y calificación.
+- Portal privado del transportista con ganancias por día, semana, mes y año, detalle por carrera y exportación CSV.
+- Encomiendas multipunto con varias recogidas y entregas ordenadas, contacto por parada y tiempo en horas/minutos.
+- Rangos automáticos `MOVIX Inicial`, `MOVIX Pro` y `Estrella MOVIX` para clientes y transportistas.
+- Alerta visible para transportistas y administradores cuando un cliente tiene menos de 3 estrellas.
+- Gestión de flotas: varios vehículos, perfiles de choferes, asignación de unidad y reportes filtrables por vehículo.
 - Listado paginado de carreras asignadas, filtros y detalle completo de cada servicio.
 - Comentarios y calificaciones reales de `driver_reviews` con distribución por estrellas.
 - Perfil del transportista con vehículo, documentos, edición y cambio de contraseña de Supabase.
@@ -78,12 +82,21 @@ instalar las ampliaciones ejecutando, en este orden:
 ```text
 sql/monthly_payments.sql
 sql/payment_banks_inbox_invoices.sql
+sql/020_movix_routes_ranks_fleet.sql
 ```
 
 El segundo archivo crea las tablas `payment_bank_accounts`, `driver_invoices`
 y `driver_inbox_messages`, sus relaciones, índices y políticas RLS. También
 registra los cuatro bancos como ocultos. En el panel entra en **Bancos y
 cuentas**, completa los datos reales y activa únicamente los que usarás.
+
+`020_movix_routes_ranks_fleet.sql` añade `ride_stops`, `fleet_vehicles`,
+`fleet_drivers`, la vista `profile_ranks`, las relaciones de flota en `rides`,
+índices y políticas RLS. También convierte cada carrera antigua en una ruta de
+dos paradas sin borrar ni modificar sus direcciones originales.
+
+Los rangos se calculan así: **Estrella MOVIX** desde 100 carreras y 4,7;
+**MOVIX Pro** desde 40 carreras y 4,3; los demás perfiles usan **MOVIX Inicial**.
 
 La app móvil debe comprobar `profiles.is_active` después del inicio de sesión y
 antes de permitir solicitudes/aceptaciones. Cuando el administrador bloquea una

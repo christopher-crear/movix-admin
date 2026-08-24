@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Panel MOVIX">
-    <title>{% block title %}Panel{% endblock %} · MOVIX</title>
+    <title>{% block title %}Panel{% endblock %} · {{ system_config.app_name|default:'MOVIX' }}</title>
     <link rel="icon" href="{% static 'img/ICONO_APP.png' %}" type="image/svg+xml">
     <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260810-140">
     {% block styles %}{% endblock %}
@@ -100,13 +100,15 @@
     <aside class="sidebar" id="sidebar">
         <a class="brand" href="{% if is_driver_portal %}{% url 'panel:driver_dashboard' %}{% else %}{% url 'panel:dashboard' %}{% endif %}">
             <img src="{% static 'img/ICONO_APP.png' %}" alt="MOVIX">
-            <span><strong>MOVIX</strong><small>Tu carga, nuestro camino</small></span>
+            <span><strong>{{ system_config.app_name|default:'MOVIX' }}</strong><small>Tu carga, nuestro camino</small></span>
         </a>
         <nav class="sidebar-nav" aria-label="Menú principal">
             {% if is_driver_portal %}
             <a class="nav-link {% if request.resolver_match.url_name == 'driver_dashboard' %}active{% endif %}" data-module-name="Resumen" href="{% url 'panel:driver_dashboard' %}"><svg><use href="#i-home"/></svg><span>Resumen</span></a>
             <a class="nav-link {% if request.resolver_match.url_name == 'driver_rides' or request.resolver_match.url_name == 'driver_ride_detail' %}active{% endif %}" data-module-name="Mis carreras" href="{% url 'panel:driver_rides' %}"><svg><use href="#i-truck"/></svg><span>Mis carreras</span></a>
             <a class="nav-link {% if request.resolver_match.url_name == 'driver_reviews' %}active{% endif %}" data-module-name="Comentarios" href="{% url 'panel:driver_reviews' %}"><svg><use href="#i-star"/></svg><span>Comentarios</span></a>
+            <a class="nav-link {% if request.resolver_match.url_name == 'driver_earnings' %}active{% endif %}" data-module-name="Ganancias" href="{% url 'panel:driver_earnings' %}"><svg><use href="#dp-money"/></svg><span>Ganancias</span></a>
+            <a class="nav-link {% if request.resolver_match.url_name == 'driver_fleet' %}active{% endif %}" data-module-name="Mi flota" href="{% url 'panel:driver_fleet' %}"><svg><use href="#i-truck"/></svg><span>Mi flota y choferes</span></a>
             <a class="nav-link {% if request.resolver_match.url_name == 'driver_payments' %}active{% endif %}" data-module-name="Mensualidad" href="{% url 'panel:driver_payments' %}"><svg><use href="#i-inbox"/></svg><span>Mensualidad</span></a>
             <a class="nav-link {% if request.resolver_match.url_name == 'driver_invoices' %}active{% endif %}" data-module-name="Mis facturas" href="{% url 'panel:driver_invoices' %}"><svg><use href="#i-file"/></svg><span>Mis facturas</span></a>
             <a class="nav-link {% if request.resolver_match.url_name == 'driver_inbox' or request.resolver_match.url_name == 'driver_inbox_detail' %}active{% endif %}" data-module-name="Buzón" href="{% url 'panel:driver_inbox' %}"><svg><use href="#i-mail"/></svg><span>Buzón</span>{% if driver_unread_count %}<b class="nav-count">{{ driver_unread_count }}</b>{% endif %}</a>
@@ -142,12 +144,20 @@
             </form>
             <div class="topbar-actions">
                 {% if not is_driver_portal %}
-                <button class="icon-button notification-button" type="button" data-dropdown-toggle="activityDropdown" aria-label="Actividad reciente"><svg><use href="#i-bell"/></svg>{% if top_activity %}<i></i>{% endif %}</button>
+                <button class="icon-button notification-button" type="button" data-dropdown-toggle="activityDropdown" aria-label="Notificaciones administrativas"><svg><use href="#i-bell"/></svg>{% if admin_alert_count %}<i></i><b>{{ admin_alert_count }}</b>{% endif %}</button>
                 <div class="dropdown activity-dropdown" id="activityDropdown">
-                    <strong>Actividad reciente</strong>
-                    {% for item in top_activity %}<a href="{% url 'panel:dashboard' %}"><span>{{ item.description|truncatechars:58 }}</span><small>{{ item.created_at|timesince }} atrás</small></a>{% empty %}<p>Sin actividad nueva.</p>{% endfor %}
+                    <strong>Notificaciones</strong>
+                    {% if pending_payment_count %}<a href="{% url 'panel:monthly_payment_list' %}?status=pending"><span><b>{{ pending_payment_count }}</b> pago{{ pending_payment_count|pluralize }} nuevo{{ pending_payment_count|pluralize }}</span><small>Revisar comprobantes pendientes</small></a>{% endif %}
+                    {% if pending_profile_count %}<a href="{% url 'panel:verification_list' %}?status=pending"><span><b>{{ pending_profile_count }}</b> perfil{{ pending_profile_count|pluralize:"es" }} por verificar</span><small>Revisar datos y documentos</small></a>{% endif %}
+                    {% if not admin_alert_count %}<p>Todo está al día.</p>{% endif %}
                 </div>
-                <a href="{% url 'panel:admin_profile' %}" class="admin-chip" title="Abrir perfil"><span>{{ request.user.first_name|default:request.user.username|slice:':1' }}{{ request.user.last_name|slice:':1' }}</span><b>{{ request.user.get_full_name|default:request.user.username }}</b></a>
+                <button class="admin-chip admin-menu-toggle" type="button" data-dropdown-toggle="adminMenuDropdown" aria-label="Abrir menú de cuenta" aria-expanded="false"><span>{{ request.user.first_name|default:request.user.username|slice:':1' }}{{ request.user.last_name|slice:':1' }}</span><b>{{ request.user.get_full_name|default:request.user.username }}</b><i>⌄</i></button>
+                <div class="dropdown admin-menu-dropdown" id="adminMenuDropdown">
+                    <header><strong>{{ request.user.get_full_name|default:request.user.username }}</strong><small>Administrador</small></header>
+                    <a href="{% url 'panel:admin_profile' %}"><svg><use href="#i-user"/></svg><span>Mi perfil</span></a>
+                    <a href="{% url 'panel:settings' %}"><svg><use href="#i-settings"/></svg><span>Configuración</span></a>
+                    <form action="{% url 'logout' %}" method="post">{% csrf_token %}<button type="submit"><svg><use href="#i-logout"/></svg><span>Cerrar sesión</span></button></form>
+                </div>
                 {% else %}
                 <a href="{% url 'panel:driver_profile' %}" class="admin-chip" title="Abrir mi perfil">
                     {% if driver_avatar_url %}<span class="admin-chip-photo"><img src="{{ driver_avatar_url }}" alt="Foto de {{ driver.full_name }}"></span>{% else %}<span>{{ driver.initials }}</span>{% endif %}
@@ -157,6 +167,7 @@
             </div>
         </header>
         <main class="content">
+            {% if system_config.maintenance_mode %}<div class="alert alert-warning maintenance-banner"><span><strong>Modo mantenimiento activo.</strong> Las operaciones de la aplicación móvil deben permanecer temporalmente restringidas.</span></div>{% endif %}
             {% if messages %}
             <div class="messages" aria-live="polite">
                 {% for message in messages %}<div class="alert alert-{{ message.tags|default:'info' }}"><span>{{ message }}</span><button type="button" data-dismiss>×</button></div>{% endfor %}
@@ -179,6 +190,7 @@
     <footer><span id="documentPreviewName"></span><a class="btn btn-secondary" id="documentPreviewDownload" href="#"><svg><use href="#i-download"/></svg> Descargar original</a></footer>
 </dialog>
 <script src="{% static 'js/app.js' %}?v=20260810-140"></script>
+<script>document.querySelectorAll('.sidebar .nav-link').forEach(function(el){var text=el.querySelector('span')?.textContent?.trim();if(text){el.dataset.tooltip=text;el.setAttribute('aria-label',text);}});</script>
 {% block scripts %}{% endblock %}
 </body>
 </html>
