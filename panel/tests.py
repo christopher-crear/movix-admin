@@ -15,6 +15,8 @@ from django.urls import reverse
 from django.utils import timezone
 
 from .forms import (
+    FleetDriverForm,
+    FleetVehicleForm,
     DriverSelfProfileForm,
     PasswordRecoveryRequestForm,
     PasswordResetConfirmForm,
@@ -25,6 +27,7 @@ from .forms import (
 )
 from .models import (
     Advertisement,
+    AdminNotification,
     AdminProfile,
     AuditLog,
     ContactRequest,
@@ -63,6 +66,7 @@ EXTERNAL_MODELS = [
     DeviceToken,
     AuditLog,
     SystemSetting,
+    AdminNotification,
 ]
 
 
@@ -214,6 +218,44 @@ class FormTests(SimpleTestCase):
         self.assertIsInstance(form.fields["first_name"].widget, forms.TextInput)
         self.assertNotIsInstance(form.fields["first_name"].widget, forms.Textarea)
         self.assertIsInstance(form.fields["email"].widget, forms.EmailInput)
+
+    def test_fleet_text_fields_are_single_line_inputs(self):
+        vehicle = FleetVehicleForm()
+        driver = FleetDriverForm()
+        for field_name in ("alias", "plate", "permit_number"):
+            self.assertIsInstance(vehicle.fields[field_name].widget, forms.TextInput)
+        for field_name in ("first_name", "last_name", "identification_number", "license_number", "phone"):
+            self.assertIsInstance(driver.fields[field_name].widget, forms.TextInput)
+
+    def test_ecuador_plate_is_normalized_and_invalid_phone_is_rejected(self):
+        form = ProfileForm(
+            data={
+                "first_name": "María", "last_name": "Vera", "email": "maria@example.com",
+                "phone": "09999ABC99", "identification_number": "1106056011",
+                "license_number": "1106056011", "vehicle_plate": "laa5986",
+                "load_capacity": "900", "vehicle_year": str(timezone.localdate().year),
+                "vehicle_type": "camioneta", "experience_years": "5", "is_available": "on",
+            },
+            role="transportista",
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn("phone", form.errors)
+        self.assertEqual(form.cleaned_data["vehicle_plate"], "LAA-5986")
+
+    def test_names_reject_numbers_and_license_requires_ecuadorian_number(self):
+        form = ProfileForm(
+            data={
+                "first_name": "María2", "last_name": "Vera", "email": "maria@example.com",
+                "phone": "0999999999", "identification_number": "1106056011",
+                "license_number": "LIC-123", "vehicle_plate": "LAA-5986",
+                "load_capacity": "900", "vehicle_year": str(timezone.localdate().year),
+                "vehicle_type": "camioneta", "experience_years": "5", "is_available": "on",
+            },
+            role="transportista",
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn("first_name", form.errors)
+        self.assertIn("license_number", form.errors)
 
     def test_driver_vehicle_type_is_limited_to_three_choices(self):
         form = ProfileForm(role="transportista")

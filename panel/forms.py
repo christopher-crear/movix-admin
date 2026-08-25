@@ -1,3 +1,6 @@
+import re
+from datetime import date
+
 from django import forms
 from django.contrib.auth import password_validation
 from django.contrib.auth.models import User
@@ -23,6 +26,47 @@ VEHICLE_TYPE_CHOICES = [
     ("camion_pequeno", "Camión pequeño"),
     ("camion_mediano", "Camión mediano"),
 ]
+
+NAME_RE = re.compile(r"^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+(?:[ '\-][A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+)*$")
+
+
+def validate_ecuador_identification(value, label="La cédula"):
+    value = re.sub(r"\D", "", value or "")
+    if len(value) != 10:
+        raise forms.ValidationError(f"{label} debe contener exactamente 10 dígitos.")
+    province, third = int(value[:2]), int(value[2])
+    if province not in {*range(1, 25), 30} or third >= 6:
+        raise forms.ValidationError(f"{label} no tiene un formato ecuatoriano válido.")
+    total = 0
+    for index, digit in enumerate(map(int, value[:9])):
+        product = digit * (2 if index % 2 == 0 else 1)
+        total += product - 9 if product > 9 else product
+    if (10 - total % 10) % 10 != int(value[-1]):
+        raise forms.ValidationError(f"{label} no supera la validación ecuatoriana.")
+    return value
+
+
+def validate_name(value, label="Este campo"):
+    value = " ".join((value or "").strip().split())
+    if value and not NAME_RE.fullmatch(value):
+        raise forms.ValidationError(f"{label} solo admite letras, espacios, apóstrofes y guiones.")
+    return value
+
+
+def validate_ecuador_phone(value):
+    value = re.sub(r"[\s()-]", "", value or "")
+    if value.startswith("+593"):
+        value = "0" + value[4:]
+    if not re.fullmatch(r"09\d{8}", value):
+        raise forms.ValidationError("Ingresa un celular ecuatoriano de 10 dígitos que empiece con 09.")
+    return value
+
+
+def validate_ecuador_plate(value):
+    compact = re.sub(r"[\s-]", "", value or "").upper()
+    if not re.fullmatch(r"[A-Z]{3}\d{3,4}", compact):
+        raise forms.ValidationError("La placa debe tener el formato ecuatoriano ABC-123 o ABC-1234.")
+    return f"{compact[:3]}-{compact[3:]}"
 
 
 class StyledFormMixin:
@@ -79,20 +123,20 @@ class ProfileForm(StyledFormMixin, forms.ModelForm):
             "is_available": "Disponible para servicios",
         }
         widgets = {
-            "first_name": forms.TextInput(attrs={"maxlength": 80, "autocomplete": "given-name"}),
-            "last_name": forms.TextInput(attrs={"maxlength": 80, "autocomplete": "family-name"}),
+            "first_name": forms.TextInput(attrs={"maxlength": 80, "autocomplete": "given-name", "data-letters-only": "true"}),
+            "last_name": forms.TextInput(attrs={"maxlength": 80, "autocomplete": "family-name", "data-letters-only": "true"}),
             "email": forms.EmailInput(attrs={"maxlength": 160, "autocomplete": "email"}),
-            "phone": forms.TextInput(attrs={"maxlength": 20, "inputmode": "tel", "autocomplete": "tel"}),
-            "identification_number": forms.TextInput(attrs={"maxlength": 10, "inputmode": "numeric"}),
-            "license_number": forms.TextInput(attrs={"maxlength": 40}),
-            "vehicle_plate": forms.TextInput(attrs={"maxlength": 20}),
+            "phone": forms.TextInput(attrs={"maxlength": 10, "inputmode": "numeric", "autocomplete": "tel", "data-digits-only": "true", "placeholder": "09XXXXXXXX"}),
+            "identification_number": forms.TextInput(attrs={"maxlength": 10, "inputmode": "numeric", "data-digits-only": "true"}),
+            "license_number": forms.TextInput(attrs={"maxlength": 10, "inputmode": "numeric", "data-digits-only": "true"}),
+            "vehicle_plate": forms.TextInput(attrs={"maxlength": 8, "data-ecuador-plate": "true", "placeholder": "ABC-1234"}),
             "load_capacity": forms.NumberInput(attrs={"min": 0, "step": "0.01"}),
             "vehicle_year": forms.NumberInput(attrs={"min": 1950, "max": 2100, "inputmode": "numeric"}),
             "vehicle_type": forms.Select(choices=VEHICLE_TYPE_CHOICES),
             "experience_years": forms.NumberInput(attrs={"min": 0, "max": 80, "inputmode": "numeric"}),
-            "permit_number": forms.TextInput(attrs={"maxlength": 80}),
-            "permit_details": forms.Textarea(attrs={"rows": 3, "maxlength": 500}),
-            "company_name": forms.TextInput(attrs={"maxlength": 160}),
+            "permit_number": forms.TextInput(attrs={"maxlength": 40, "data-code-only": "true"}),
+            "permit_details": forms.TextInput(attrs={"maxlength": 250}),
+            "company_name": forms.TextInput(attrs={"maxlength": 160, "data-business-name": "true"}),
         }
 
     def __init__(self, *args, role="cliente", **kwargs):
@@ -133,9 +177,31 @@ class ProfileForm(StyledFormMixin, forms.ModelForm):
 
     def clean_identification_number(self):
         value = (self.cleaned_data.get("identification_number") or "").strip()
-        if value and (not value.isdigit() or len(value) != 10):
-            raise forms.ValidationError("La cédula debe contener exactamente 10 dígitos.")
-        return value or None
+        return validate_ecuador_identification(value) if value else None
+
+    def clean_first_name(self):
+        return validate_name(self.cleaned_data.get("first_name"), "El nombre")
+
+    def clean_last_name(self):
+        return validate_name(self.cleaned_data.get("last_name"), "El apellido")
+
+    def clean_phone(self):
+        value = (self.cleaned_data.get("phone") or "").strip()
+        return validate_ecuador_phone(value) if value else None
+
+    def clean_license_number(self):
+        value = (self.cleaned_data.get("license_number") or "").strip()
+        return validate_ecuador_identification(value, "El número de licencia") if value else None
+
+    def clean_vehicle_plate(self):
+        value = (self.cleaned_data.get("vehicle_plate") or "").strip()
+        return validate_ecuador_plate(value) if value else None
+
+    def clean_vehicle_year(self):
+        value = self.cleaned_data.get("vehicle_year")
+        if value and not date.today().year - 15 <= value <= date.today().year:
+            raise forms.ValidationError(f"El vehículo debe ser de {date.today().year - 15} a {date.today().year}.")
+        return value
 
     def clean_vehicle_type(self):
         value = self.cleaned_data.get("vehicle_type")
@@ -296,14 +362,26 @@ class FleetVehicleForm(StyledFormMixin, forms.ModelForm):
             "is_active": "Vehículo activo",
         }
         widgets = {
+            "alias": forms.TextInput(attrs={"maxlength": 80}),
+            "plate": forms.TextInput(attrs={"maxlength": 8, "data-ecuador-plate": "true", "placeholder": "ABC-1234"}),
             "vehicle_type": forms.Select(choices=VEHICLE_TYPE_CHOICES),
-            "year": forms.NumberInput(attrs={"min": 1950, "max": 2100}),
+            "year": forms.NumberInput(attrs={"min": date.today().year - 15, "max": date.today().year, "inputmode": "numeric"}),
             "load_capacity": forms.NumberInput(attrs={"min": 0, "step": "0.01"}),
+            "permit_number": forms.TextInput(attrs={"maxlength": 40, "data-code-only": "true"}),
         }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.apply_styles()
+
+    def clean_plate(self):
+        return validate_ecuador_plate(self.cleaned_data.get("plate"))
+
+    def clean_year(self):
+        value = self.cleaned_data.get("year")
+        if value and not date.today().year - 15 <= value <= date.today().year:
+            raise forms.ValidationError(f"El vehículo debe ser de {date.today().year - 15} a {date.today().year}.")
+        return value
 
 
 class FleetDriverForm(StyledFormMixin, forms.ModelForm):
@@ -315,6 +393,14 @@ class FleetDriverForm(StyledFormMixin, forms.ModelForm):
             "license_number": "Licencia", "phone": "Teléfono", "email": "Correo",
             "vehicle": "Vehículo asignado", "is_active": "Chofer activo",
         }
+        widgets = {
+            "first_name": forms.TextInput(attrs={"maxlength": 80, "data-letters-only": "true"}),
+            "last_name": forms.TextInput(attrs={"maxlength": 80, "data-letters-only": "true"}),
+            "identification_number": forms.TextInput(attrs={"maxlength": 10, "inputmode": "numeric", "data-digits-only": "true"}),
+            "license_number": forms.TextInput(attrs={"maxlength": 10, "inputmode": "numeric", "data-digits-only": "true"}),
+            "phone": forms.TextInput(attrs={"maxlength": 10, "inputmode": "numeric", "data-digits-only": "true", "placeholder": "09XXXXXXXX"}),
+            "email": forms.EmailInput(attrs={"maxlength": 160}),
+        }
 
     def __init__(self, *args, owner=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -323,10 +409,52 @@ class FleetDriverForm(StyledFormMixin, forms.ModelForm):
         self.apply_styles()
 
     def clean_identification_number(self):
-        value = (self.cleaned_data.get("identification_number") or "").strip()
-        if not value.isdigit() or len(value) != 10:
-            raise forms.ValidationError("La cédula debe contener exactamente 10 dígitos.")
-        return value
+        return validate_ecuador_identification(self.cleaned_data.get("identification_number"))
+
+    def clean_first_name(self):
+        return validate_name(self.cleaned_data.get("first_name"), "El nombre")
+
+    def clean_last_name(self):
+        return validate_name(self.cleaned_data.get("last_name"), "El apellido")
+
+    def clean_license_number(self):
+        return validate_ecuador_identification(self.cleaned_data.get("license_number"), "El número de licencia")
+
+    def clean_phone(self):
+        value = (self.cleaned_data.get("phone") or "").strip()
+        return validate_ecuador_phone(value) if value else None
+
+
+class AdminFleetVehicleForm(FleetVehicleForm):
+    owner = forms.ModelChoiceField(label="Propietario transportista", queryset=Profile.objects.none())
+
+    def __init__(self, *args, owners=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["owner"].queryset = owners if owners is not None else Profile.objects.none()
+        self.order_fields(["owner", *self.Meta.fields])
+
+
+class AdminFleetDriverForm(FleetDriverForm):
+    owner = forms.ModelChoiceField(label="Propietario transportista", queryset=Profile.objects.none())
+
+    def __init__(self, *args, owners=None, **kwargs):
+        owner = kwargs.pop("owner", None)
+        super().__init__(*args, owner=owner, **kwargs)
+        self.fields["owner"].queryset = owners if owners is not None else Profile.objects.none()
+        if self.is_bound and not owner:
+            owner_id = self.data.get("owner")
+            self.fields["vehicle"].queryset = FleetVehicle.objects.filter(owner_id=owner_id, is_active=True)
+        elif not self.is_bound:
+            self.fields["vehicle"].queryset = FleetVehicle.objects.filter(is_active=True).select_related("owner")
+        self.fields["vehicle"].label_from_instance = lambda item: f"{item.owner.full_name} · {item.plate} · {item.alias or item.vehicle_type}"
+        self.order_fields(["owner", *self.Meta.fields])
+
+    def clean(self):
+        cleaned = super().clean()
+        owner, vehicle = cleaned.get("owner"), cleaned.get("vehicle")
+        if owner and vehicle and vehicle.owner_id != owner.id:
+            self.add_error("vehicle", "El vehículo debe pertenecer al propietario seleccionado.")
+        return cleaned
 
 
 class DriverMonthlyPaymentForm(StyledFormMixin, forms.ModelForm):
@@ -350,8 +478,9 @@ class DriverMonthlyPaymentForm(StyledFormMixin, forms.ModelForm):
 
     class Meta:
         model = DriverMonthlyPayment
-        fields = ["period", "amount", "bank", "payment_method"]
+        fields = ["vehicle", "period", "amount", "bank", "payment_method"]
         labels = {
+            "vehicle": "Vehículo que cubre la mensualidad",
             "period": "Mes que estás pagando",
             "amount": "Valor pagado (USD)",
             "bank": "Banco utilizado",
@@ -364,8 +493,10 @@ class DriverMonthlyPaymentForm(StyledFormMixin, forms.ModelForm):
             "payment_method": forms.Select(),
         }
 
-    def __init__(self, *args, bank_accounts=None, **kwargs):
+    def __init__(self, *args, bank_accounts=None, driver=None, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields["vehicle"].queryset = FleetVehicle.objects.filter(owner=driver, is_active=True) if driver else FleetVehicle.objects.none()
+        self.fields["vehicle"].label_from_instance = lambda item: f"{item.plate} · {item.alias or item.vehicle_type}"
         self.fields["period"].input_formats = ["%Y-%m", "%Y-%m-%d"]
         # Cuando la vista entrega explícitamente las cuentas (aunque sea una
         # lista vacía), solo se permiten bancos configurados y visibles por el

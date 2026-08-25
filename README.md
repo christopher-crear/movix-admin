@@ -66,23 +66,27 @@ El sistema utiliza las tablas existentes de la app móvil (`profiles`, `rides`, 
 
 ## 1. Ejecutar el SQL requerido
 
-Abre el proyecto de Supabase y entra en **SQL Editor**. Copia y ejecuta todo el archivo:
+Abre el proyecto de Supabase y entra en **SQL Editor**. Para una instalación
+nueva ejecuta, en este orden:
 
 ```text
 sql/supabase_panel.sql
+sql/020_movix_routes_ranks_fleet.sql
+sql/021_movix_admin_fleet_payments.sql
 ```
 
 El script puede ejecutarse más de una vez. No elimina información existente.
 También sincroniza los registros antiguos que ya tenían `verified` o
 `profile_verified=true`, por lo que conservarán correctamente su estado aprobado.
 
-Si ya habías ejecutado una versión anterior de `supabase_panel.sql`, puedes
-instalar las ampliaciones ejecutando, en este orden:
+Si ya habías ejecutado una versión anterior de `supabase_panel.sql`, instala
+las ampliaciones ejecutando, en este orden:
 
 ```text
 sql/monthly_payments.sql
 sql/payment_banks_inbox_invoices.sql
 sql/020_movix_routes_ranks_fleet.sql
+sql/021_movix_admin_fleet_payments.sql
 ```
 
 El segundo archivo crea las tablas `payment_bank_accounts`, `driver_invoices`
@@ -94,6 +98,11 @@ cuentas**, completa los datos reales y activa únicamente los que usarás.
 `fleet_drivers`, la vista `profile_ranks`, las relaciones de flota en `rides`,
 índices y políticas RLS. También convierte cada carrera antigua en una ruta de
 dos paradas sin borrar ni modificar sus direcciones originales.
+
+`021_movix_admin_fleet_payments.sql` deja la flota en modo de consulta para el
+propietario y reserva su creación, agrupación y eliminación al administrador;
+además crea una mensualidad independiente por vehículo, validaciones de formato
+y notificaciones administrativas que se eliminan al abrirlas.
 
 Los rangos se calculan así: **Estrella MOVIX** desde 100 carreras y 4,7;
 **MOVIX Pro** desde 40 carreras y 4,3; los demás perfiles usan **MOVIX Inicial**.

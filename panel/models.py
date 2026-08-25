@@ -331,6 +331,24 @@ class Notification(models.Model):
         ordering = ["-created_at"]
 
 
+class AdminNotification(models.Model):
+    """Alertas operativas generadas para el panel administrativo."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    type = models.TextField(default="general")
+    title = models.TextField()
+    message = models.TextField()
+    target_url = models.TextField(blank=True, null=True)
+    entity_type = models.TextField(blank=True, null=True)
+    entity_id = models.UUIDField(blank=True, null=True)
+    created_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        managed = False
+        db_table = "admin_notifications"
+        ordering = ["-created_at"]
+
+
 class DriverMonthlyPayment(models.Model):
     """Mensualidades declaradas por los transportistas en Supabase."""
 
@@ -349,6 +367,14 @@ class DriverMonthlyPayment(models.Model):
         models.DO_NOTHING,
         db_column="driver_id",
         related_name="monthly_payments",
+    )
+    vehicle = models.ForeignKey(
+        FleetVehicle,
+        models.DO_NOTHING,
+        db_column="vehicle_id",
+        related_name="monthly_payments",
+        blank=True,
+        null=True,
     )
     period = models.DateField()
     amount = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)

@@ -220,6 +220,20 @@
     }));
   }
 
+  document.querySelectorAll('[data-letters-only]').forEach(input => input.addEventListener('input', () => {
+    input.value = input.value.replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ '\-]/g, '');
+  }));
+  document.querySelectorAll('[data-digits-only]').forEach(input => input.addEventListener('input', () => {
+    input.value = input.value.replace(/\D/g, '').slice(0, Number(input.maxLength) || undefined);
+  }));
+  document.querySelectorAll('[data-ecuador-plate]').forEach(input => input.addEventListener('input', () => {
+    const raw = input.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 7);
+    input.value = raw.length > 3 ? `${raw.slice(0, 3)}-${raw.slice(3)}` : raw;
+  }));
+  document.querySelectorAll('[data-code-only]').forEach(input => input.addEventListener('input', () => {
+    input.value = input.value.toUpperCase().replace(/[^A-Z0-9/\-]/g, '');
+  }));
+
   const rawData = document.getElementById('dashboard-data');
   if (rawData) {
     let data = JSON.parse(rawData.textContent); if (typeof data === 'string') data = JSON.parse(data);

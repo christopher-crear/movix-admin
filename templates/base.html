@@ -117,6 +117,7 @@
             <a class="nav-link {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}" data-module-name="Inicio" href="{% url 'panel:dashboard' %}"><svg><use href="#i-home"/></svg><span>Inicio</span></a>
             <a class="nav-link {% if request.resolver_match.kwargs.kind == 'users' %}active{% endif %}" data-module-name="Usuarios" href="{% url 'panel:profile_list' 'users' %}"><svg><use href="#i-users"/></svg><span>Usuarios</span></a>
             <a class="nav-link {% if request.resolver_match.kwargs.kind == 'drivers' %}active{% endif %}" data-module-name="Transportistas" href="{% url 'panel:profile_list' 'drivers' %}"><svg><use href="#i-truck"/></svg><span>Transportistas</span></a>
+            <a class="nav-link {% if request.resolver_match.url_name == 'admin_fleet' %}active{% endif %}" data-module-name="Flotas y choferes" href="{% url 'panel:admin_fleet' %}"><svg><use href="#dp-truck"/></svg><span>Flotas y choferes</span></a>
             <a class="nav-link {% if request.resolver_match.url_name == 'notifications' %}active{% endif %}" data-module-name="Notificaciones" href="{% url 'panel:notifications' %}"><svg><use href="#i-bell"/></svg><span>Notificaciones</span></a>
             <a class="nav-link {% if 'advertisement' in request.resolver_match.url_name %}active{% endif %}" data-module-name="Publicidad" href="{% url 'panel:advertisements' %}"><svg><use href="#i-bolt"/></svg><span>Publicidad</span></a>
             <a class="nav-link {% if 'verification' in request.resolver_match.url_name %}active{% endif %}" data-module-name="Verificar documentos" href="{% url 'panel:verification_list' %}"><svg><use href="#i-clipboard"/></svg><span>Verificar documentos</span></a>
@@ -144,14 +145,12 @@
             </form>
             <div class="topbar-actions">
                 {% if not is_driver_portal %}
-                <button class="icon-button notification-button" type="button" data-dropdown-toggle="activityDropdown" aria-label="Notificaciones administrativas"><svg><use href="#i-bell"/></svg>{% if admin_alert_count %}<i></i><b>{{ admin_alert_count }}</b>{% endif %}</button>
+                <button class="icon-button notification-button" type="button" data-dropdown-toggle="activityDropdown" aria-label="Notificaciones administrativas"><svg><use href="#i-bell"/></svg>{% if admin_notification_count %}<b>{{ admin_notification_count }}</b>{% endif %}</button>
                 <div class="dropdown activity-dropdown" id="activityDropdown">
                     <strong>Notificaciones</strong>
-                    {% if pending_payment_count %}<a href="{% url 'panel:monthly_payment_list' %}?status=pending"><span><b>{{ pending_payment_count }}</b> pago{{ pending_payment_count|pluralize }} nuevo{{ pending_payment_count|pluralize }}</span><small>Revisar comprobantes pendientes</small></a>{% endif %}
-                    {% if pending_profile_count %}<a href="{% url 'panel:verification_list' %}?status=pending"><span><b>{{ pending_profile_count }}</b> perfil{{ pending_profile_count|pluralize:"es" }} por verificar</span><small>Revisar datos y documentos</small></a>{% endif %}
-                    {% if not admin_alert_count %}<p>Todo está al día.</p>{% endif %}
+                    {% for notice in admin_notifications %}<form method="post" action="{% url 'panel:admin_notification_read' notice.id %}" class="notification-entry">{% csrf_token %}<button type="submit"><span><b>{{ notice.title }}</b><small>{{ notice.message }}</small></span></button></form>{% empty %}<p>Todo está al día.</p>{% endfor %}
                 </div>
-                <button class="admin-chip admin-menu-toggle" type="button" data-dropdown-toggle="adminMenuDropdown" aria-label="Abrir menú de cuenta" aria-expanded="false"><span>{{ request.user.first_name|default:request.user.username|slice:':1' }}{{ request.user.last_name|slice:':1' }}</span><b>{{ request.user.get_full_name|default:request.user.username }}</b><i>⌄</i></button>
+                <button class="admin-chip admin-menu-toggle" type="button" data-dropdown-toggle="adminMenuDropdown" aria-label="Abrir menú de cuenta" aria-expanded="false">{% if admin_avatar_url %}<span class="admin-chip-photo"><img src="{{ admin_avatar_url }}" alt="Foto de perfil">{% else %}<span>{{ request.user.first_name|default:request.user.username|slice:':1' }}{{ request.user.last_name|slice:':1' }}{% endif %}</span><b>{{ request.user.get_full_name|default:request.user.username }}</b><i>⌄</i></button>
                 <div class="dropdown admin-menu-dropdown" id="adminMenuDropdown">
                     <header><strong>{{ request.user.get_full_name|default:request.user.username }}</strong><small>Administrador</small></header>
                     <a href="{% url 'panel:admin_profile' %}"><svg><use href="#i-user"/></svg><span>Mi perfil</span></a>
@@ -159,10 +158,13 @@
                     <form action="{% url 'logout' %}" method="post">{% csrf_token %}<button type="submit"><svg><use href="#i-logout"/></svg><span>Cerrar sesión</span></button></form>
                 </div>
                 {% else %}
-                <a href="{% url 'panel:driver_profile' %}" class="admin-chip" title="Abrir mi perfil">
+                <button class="icon-button notification-button" type="button" data-dropdown-toggle="driverNotifications" aria-label="Notificaciones"><svg><use href="#i-bell"/></svg>{% if driver_notification_count %}<b>{{ driver_notification_count }}</b>{% endif %}</button>
+                <div class="dropdown activity-dropdown" id="driverNotifications"><strong>Notificaciones</strong>{% for notice in driver_notifications %}<form method="post" action="{% url 'panel:driver_notification_read' notice.id %}" class="notification-entry">{% csrf_token %}<button type="submit"><span><b>{{ notice.title }}</b><small>{{ notice.message }}</small></span></button></form>{% empty %}<p>No tienes notificaciones nuevas.</p>{% endfor %}</div>
+                <button class="admin-chip admin-menu-toggle" type="button" data-dropdown-toggle="driverMenuDropdown" aria-label="Abrir menú de cuenta" aria-expanded="false">
                     {% if driver_avatar_url %}<span class="admin-chip-photo"><img src="{{ driver_avatar_url }}" alt="Foto de {{ driver.full_name }}"></span>{% else %}<span>{{ driver.initials }}</span>{% endif %}
-                    <b>{{ driver.full_name }}</b>
-                </a>
+                    <b>{{ driver.full_name }}</b><i>⌄</i>
+                </button>
+                <div class="dropdown admin-menu-dropdown" id="driverMenuDropdown"><header><strong>{{ driver.full_name }}</strong><small>Transportista</small></header><a href="{% url 'panel:driver_profile' %}"><svg><use href="#i-user"/></svg><span>Mi perfil</span></a><a href="{% url 'panel:driver_fleet' %}"><svg><use href="#i-truck"/></svg><span>Mi flota</span></a><form action="{% url 'logout' %}" method="post">{% csrf_token %}<button type="submit"><svg><use href="#i-logout"/></svg><span>Cerrar sesión</span></button></form></div>
                 {% endif %}
             </div>
         </header>

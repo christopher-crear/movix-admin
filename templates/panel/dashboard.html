@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}Inicio{% endblock %}
 {% block content %}
-<div class="page-heading"><div><h1>Buenos días, {{ request.user.first_name|default:request.user.username }} 👋</h1><p>Aquí está el resumen real de MOVIX</p></div></div>
+<div class="page-heading"><div><h1>Buenos días, {{ request.user.first_name|default:request.user.username }} 👋</h1><p>Resumen de {{ month_label }}</p></div><form method="get" class="dashboard-month-filter"><label>Mes <input class="form-control" type="month" name="month" value="{{ month_value }}"></label><button class="btn btn-primary">Filtrar</button><a class="btn btn-secondary" href="?month={{ month_value }}&export=csv"><svg><use href="#i-download"/></svg>Exportar mes</a></form></div>
 
 <section class="stat-grid">
     <a class="stat-card" href="{% url 'panel:profile_list' 'users' %}"><div><span>Usuarios registrados</span><strong>{{ client_count }}</strong><small>Ver gestión completa</small></div><i class="soft-blue"><svg><use href="#i-users"/></svg></i></a>
