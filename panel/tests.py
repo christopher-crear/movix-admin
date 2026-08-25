@@ -241,6 +241,20 @@ class FormTests(SimpleTestCase):
         self.assertIn("phone", form.errors)
         self.assertEqual(form.cleaned_data["vehicle_plate"], "LAA-5986")
 
+    def test_ecuador_phone_is_saved_with_international_prefix(self):
+        form = ProfileForm(
+            data={
+                "first_name": "María", "last_name": "Vera", "email": "maria@example.com",
+                "phone": "987654321", "identification_number": "1106056011",
+                "license_number": "1106056011", "vehicle_plate": "LAA-5986",
+                "load_capacity": "900", "vehicle_year": str(timezone.localdate().year),
+                "vehicle_type": "camioneta", "experience_years": "5", "is_available": "on",
+            },
+            role="transportista",
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["phone"], "+593987654321")
+
     def test_names_reject_numbers_and_license_requires_ecuadorian_number(self):
         form = ProfileForm(
             data={

@@ -52,13 +52,15 @@ def validate_name(value, label="Este campo"):
 
 
 def validate_ecuador_phone(value):
-    value = re.sub(r"[\s()-]", "", value or "")
-    if value.startswith("+593"):
-        value = value[4:]
-    if value.startswith("09"):
+    value = re.sub(r"\D", "", value or "")
+    if value.startswith("593"):
+        value = value[3:]
+    elif value.startswith("09"):
         value = value[1:]
     if re.fullmatch(r"9\d{8}", value):
-        return "0" + value
+        # El trigger de Supabase valida el formato internacional; la interfaz
+        # muestra el prefijo fijo para que el usuario no tenga que escribirlo.
+        return "+593" + value
     raise forms.ValidationError("Ingresa los 9 dígitos de tu celular ecuatoriano empezando con 9.")
 
 
@@ -149,7 +151,9 @@ class ProfileForm(StyledFormMixin, forms.ModelForm):
         self.role = role
         if not self.is_bound and "phone" in self.fields:
             phone = str(self.initial.get("phone") or getattr(self.instance, "phone", "") or "")
-            if phone.startswith("09"):
+            if phone.startswith("+593"):
+                self.initial["phone"] = phone[4:]
+            elif phone.startswith("09"):
                 self.initial["phone"] = phone[1:]
         if role not in {"driver", "conductor", "transportista"}:
             for name in [
