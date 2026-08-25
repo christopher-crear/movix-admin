@@ -12,8 +12,6 @@ from .models import (
     ContactRequest,
     DriverInboxMessage,
     DriverMonthlyPayment,
-    FleetDriver,
-    FleetVehicle,
     PaymentBankAccount,
     Profile,
 )
@@ -85,6 +83,7 @@ class ProfileForm(StyledFormMixin, forms.ModelForm):
     license_file = forms.FileField(label="Licencia de conducir", required=False, widget=forms.FileInput(attrs={"accept": "image/jpeg,image/png,image/webp,application/pdf"}))
     registration_file = forms.FileField(label="Matrícula vehicular", required=False, widget=forms.FileInput(attrs={"accept": "image/jpeg,image/png,image/webp,application/pdf"}))
     insurance_file = forms.FileField(label="Seguro vehicular", required=False, widget=forms.FileInput(attrs={"accept": "image/jpeg,image/png,image/webp,application/pdf"}))
+    permit_file = forms.FileField(label="Permiso de operación", required=False, widget=forms.FileInput(attrs={"accept": "image/jpeg,image/png,image/webp,application/pdf"}))
 
     class Meta:
         model = Profile
@@ -103,6 +102,8 @@ class ProfileForm(StyledFormMixin, forms.ModelForm):
             "permit_number",
             "permit_details",
             "company_name",
+            "is_fleet_owner",
+            "fleet_owner",
             "is_available",
         ]
         labels = {
@@ -120,6 +121,8 @@ class ProfileForm(StyledFormMixin, forms.ModelForm):
             "permit_number": "Número de permiso de operación",
             "permit_details": "Datos adicionales del permiso",
             "company_name": "Compañía para la que trabaja",
+            "is_fleet_owner": "Este perfil es dueño de una flota",
+            "fleet_owner": "Chofer de este dueño o compañía",
             "is_available": "Disponible para servicios",
         }
         widgets = {
@@ -139,7 +142,7 @@ class ProfileForm(StyledFormMixin, forms.ModelForm):
             "company_name": forms.TextInput(attrs={"maxlength": 160, "data-business-name": "true"}),
         }
 
-    def __init__(self, *args, role="cliente", **kwargs):
+    def __init__(self, *args, role="cliente", allow_fleet_assignment=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.role = role
         if role not in {"driver", "conductor", "transportista"}:
@@ -158,9 +161,27 @@ class ProfileForm(StyledFormMixin, forms.ModelForm):
                 "license_file",
                 "registration_file",
                 "insurance_file",
+                "permit_file",
+                "is_fleet_owner",
+                "fleet_owner",
             ]:
                 self.fields.pop(name, None)
-        elif "vehicle_type" in self.fields:
+        else:
+            if not allow_fleet_assignment:
+                self.fields.pop("is_fleet_owner", None)
+                self.fields.pop("fleet_owner", None)
+            else:
+                owners = Profile.objects.filter(
+                    role__in=["driver", "conductor", "transportista"],
+                    is_fleet_owner=True,
+                ).order_by("company_name", "first_name", "last_name")
+                if self.instance and self.instance.pk:
+                    owners = owners.exclude(pk=self.instance.pk)
+                self.fields["fleet_owner"].queryset = owners
+                self.fields["fleet_owner"].required = False
+                self.fields["fleet_owner"].empty_label = "Transportista independiente / sin flota"
+                self.fields["fleet_owner"].label_from_instance = lambda owner: f"{owner.company_name or owner.full_name} · {owner.full_name}"
+        if role in {"driver", "conductor", "transportista"} and "vehicle_type" in self.fields:
             aliases = {
                 "camioneta": "camioneta",
                 "camión pequeño": "camion_pequeno",
@@ -174,6 +195,23 @@ class ProfileForm(StyledFormMixin, forms.ModelForm):
             if current in aliases:
                 self.initial["vehicle_type"] = aliases[current]
         self.apply_styles()
+
+    def clean(self):
+        cleaned = super().clean()
+        if (
+            self.instance
+            and self.instance.pk
+            and self.instance.is_fleet_owner
+            and "is_fleet_owner" in self.fields
+            and not cleaned.get("is_fleet_owner")
+            and self.instance.fleet_members.exists()
+        ):
+            self.add_error("is_fleet_owner", "Primero reasigna o desvincula todos los choferes de esta flota.")
+        if cleaned.get("is_fleet_owner"):
+            cleaned["fleet_owner"] = None
+        elif cleaned.get("fleet_owner"):
+            cleaned["is_fleet_owner"] = False
+        return cleaned
 
     def clean_identification_number(self):
         value = (self.cleaned_data.get("identification_number") or "").strip()
@@ -268,11 +306,12 @@ class PublicDriverRegistrationForm(ProfileCreateForm):
         self.fields["license_file"].help_text = "Licencia de conducir completa, vigente y legible."
         self.fields["registration_file"].help_text = "Matrícula vehicular completa y vigente."
         self.fields["insurance_file"].help_text = "Documento vigente del seguro vehicular."
+        self.fields["permit_file"].help_text = "Fotografía o PDF legible del permiso de operación, si corresponde."
         self.order_fields([
             "first_name", "last_name", "email", "phone", "identification_number",
             "license_number", "vehicle_plate", "load_capacity", "vehicle_year",
             "vehicle_type", "experience_years", "profile_file", "identification_file",
-            "vehicle_file", "license_file", "registration_file", "insurance_file",
+            "vehicle_file", "license_file", "registration_file", "insurance_file", "permit_file",
             "password", "password_confirm", "accept_terms",
         ])
 
@@ -348,115 +387,6 @@ class DriverSelfProfileForm(ProfileForm):
         # permanece protegido para evitar cambiar la identidad de la cuenta.
 
 
-class FleetVehicleForm(StyledFormMixin, forms.ModelForm):
-    class Meta:
-        model = FleetVehicle
-        fields = ["alias", "plate", "vehicle_type", "year", "load_capacity", "permit_number", "is_active"]
-        labels = {
-            "alias": "Nombre para identificarlo",
-            "plate": "Placa",
-            "vehicle_type": "Tipo de vehículo",
-            "year": "Año",
-            "load_capacity": "Capacidad (kg)",
-            "permit_number": "Permiso de operación",
-            "is_active": "Vehículo activo",
-        }
-        widgets = {
-            "alias": forms.TextInput(attrs={"maxlength": 80}),
-            "plate": forms.TextInput(attrs={"maxlength": 8, "data-ecuador-plate": "true", "placeholder": "ABC-1234"}),
-            "vehicle_type": forms.Select(choices=VEHICLE_TYPE_CHOICES),
-            "year": forms.NumberInput(attrs={"min": date.today().year - 15, "max": date.today().year, "inputmode": "numeric"}),
-            "load_capacity": forms.NumberInput(attrs={"min": 0, "step": "0.01"}),
-            "permit_number": forms.TextInput(attrs={"maxlength": 40, "data-code-only": "true"}),
-        }
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.apply_styles()
-
-    def clean_plate(self):
-        return validate_ecuador_plate(self.cleaned_data.get("plate"))
-
-    def clean_year(self):
-        value = self.cleaned_data.get("year")
-        if value and not date.today().year - 15 <= value <= date.today().year:
-            raise forms.ValidationError(f"El vehículo debe ser de {date.today().year - 15} a {date.today().year}.")
-        return value
-
-
-class FleetDriverForm(StyledFormMixin, forms.ModelForm):
-    class Meta:
-        model = FleetDriver
-        fields = ["first_name", "last_name", "identification_number", "license_number", "phone", "email", "vehicle", "is_active"]
-        labels = {
-            "first_name": "Nombres", "last_name": "Apellidos", "identification_number": "Cédula",
-            "license_number": "Licencia", "phone": "Teléfono", "email": "Correo",
-            "vehicle": "Vehículo asignado", "is_active": "Chofer activo",
-        }
-        widgets = {
-            "first_name": forms.TextInput(attrs={"maxlength": 80, "data-letters-only": "true"}),
-            "last_name": forms.TextInput(attrs={"maxlength": 80, "data-letters-only": "true"}),
-            "identification_number": forms.TextInput(attrs={"maxlength": 10, "inputmode": "numeric", "data-digits-only": "true"}),
-            "license_number": forms.TextInput(attrs={"maxlength": 10, "inputmode": "numeric", "data-digits-only": "true"}),
-            "phone": forms.TextInput(attrs={"maxlength": 10, "inputmode": "numeric", "data-digits-only": "true", "placeholder": "09XXXXXXXX"}),
-            "email": forms.EmailInput(attrs={"maxlength": 160}),
-        }
-
-    def __init__(self, *args, owner=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        if owner:
-            self.fields["vehicle"].queryset = FleetVehicle.objects.filter(owner=owner, is_active=True)
-        self.apply_styles()
-
-    def clean_identification_number(self):
-        return validate_ecuador_identification(self.cleaned_data.get("identification_number"))
-
-    def clean_first_name(self):
-        return validate_name(self.cleaned_data.get("first_name"), "El nombre")
-
-    def clean_last_name(self):
-        return validate_name(self.cleaned_data.get("last_name"), "El apellido")
-
-    def clean_license_number(self):
-        return validate_ecuador_identification(self.cleaned_data.get("license_number"), "El número de licencia")
-
-    def clean_phone(self):
-        value = (self.cleaned_data.get("phone") or "").strip()
-        return validate_ecuador_phone(value) if value else None
-
-
-class AdminFleetVehicleForm(FleetVehicleForm):
-    owner = forms.ModelChoiceField(label="Propietario transportista", queryset=Profile.objects.none())
-
-    def __init__(self, *args, owners=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.fields["owner"].queryset = owners if owners is not None else Profile.objects.none()
-        self.order_fields(["owner", *self.Meta.fields])
-
-
-class AdminFleetDriverForm(FleetDriverForm):
-    owner = forms.ModelChoiceField(label="Propietario transportista", queryset=Profile.objects.none())
-
-    def __init__(self, *args, owners=None, **kwargs):
-        owner = kwargs.pop("owner", None)
-        super().__init__(*args, owner=owner, **kwargs)
-        self.fields["owner"].queryset = owners if owners is not None else Profile.objects.none()
-        if self.is_bound and not owner:
-            owner_id = self.data.get("owner")
-            self.fields["vehicle"].queryset = FleetVehicle.objects.filter(owner_id=owner_id, is_active=True)
-        elif not self.is_bound:
-            self.fields["vehicle"].queryset = FleetVehicle.objects.filter(is_active=True).select_related("owner")
-        self.fields["vehicle"].label_from_instance = lambda item: f"{item.owner.full_name} · {item.plate} · {item.alias or item.vehicle_type}"
-        self.order_fields(["owner", *self.Meta.fields])
-
-    def clean(self):
-        cleaned = super().clean()
-        owner, vehicle = cleaned.get("owner"), cleaned.get("vehicle")
-        if owner and vehicle and vehicle.owner_id != owner.id:
-            self.add_error("vehicle", "El vehículo debe pertenecer al propietario seleccionado.")
-        return cleaned
-
-
 class DriverMonthlyPaymentForm(StyledFormMixin, forms.ModelForm):
     BANK_CHOICES = [
         ("banco_loja", "Banco de Loja"),
@@ -478,9 +408,8 @@ class DriverMonthlyPaymentForm(StyledFormMixin, forms.ModelForm):
 
     class Meta:
         model = DriverMonthlyPayment
-        fields = ["vehicle", "period", "amount", "bank", "payment_method"]
+        fields = ["period", "amount", "bank", "payment_method"]
         labels = {
-            "vehicle": "Vehículo que cubre la mensualidad",
             "period": "Mes que estás pagando",
             "amount": "Valor pagado (USD)",
             "bank": "Banco utilizado",
@@ -495,8 +424,6 @@ class DriverMonthlyPaymentForm(StyledFormMixin, forms.ModelForm):
 
     def __init__(self, *args, bank_accounts=None, driver=None, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["vehicle"].queryset = FleetVehicle.objects.filter(owner=driver, is_active=True) if driver else FleetVehicle.objects.none()
-        self.fields["vehicle"].label_from_instance = lambda item: f"{item.plate} · {item.alias or item.vehicle_type}"
         self.fields["period"].input_formats = ["%Y-%m", "%Y-%m-%d"]
         # Cuando la vista entrega explícitamente las cuentas (aunque sea una
         # lista vacía), solo se permiten bancos configurados y visibles por el

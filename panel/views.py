@@ -31,8 +31,6 @@ from django.views.decorators.http import require_POST
 
 from .decorators import admin_required, driver_portal_required
 from .forms import (
-    AdminFleetDriverForm,
-    AdminFleetVehicleForm,
     AdminProfileForm,
     AdvertisementForm,
     ContactResponseForm,
@@ -61,8 +59,6 @@ from .models import (
     DriverInvoice,
     DriverMonthlyPayment,
     DriverReview,
-    FleetDriver,
-    FleetVehicle,
     Notification,
     NotificationCampaign,
     PaymentBankAccount,
@@ -101,12 +97,13 @@ DOCUMENT_FIELDS = {
     "license": ("license_photo_url", "Licencia de conducir"),
     "registration": ("registration_photo_url", "Matrícula vehicular"),
     "insurance": ("insurance_photo_url", "Seguro vehicular"),
+    "permit": ("permit_photo_url", "Permiso de operación"),
 }
 PUBLIC_DOCUMENT_KEYS = {"profile", "vehicle"}
 
 REVERIFICATION_FIELDS = {
     "identification_number", "license_number", "vehicle_plate", "vehicle_year",
-    "vehicle_type", "identification_file", "license_file", "registration_file", "insurance_file",
+    "vehicle_type", "identification_file", "license_file", "registration_file", "insurance_file", "permit_file",
 }
 
 
@@ -117,7 +114,7 @@ def _profile_document_items(profile, keys=None):
     for key, (field_name, label) in DOCUMENT_FIELDS.items():
         if allowed_keys is not None and key not in allowed_keys:
             continue
-        if not profile.is_driver and key in {"vehicle", "license", "registration", "insurance"}:
+        if not profile.is_driver and key in {"vehicle", "license", "registration", "insurance", "permit"}:
             continue
         value = getattr(profile, field_name, "")
         if key == "profile" and not value:
@@ -675,8 +672,9 @@ def driver_rides(request):
 @driver_portal_required
 def driver_ride_detail(request, ride_id):
     driver = _current_driver(request)
-    ride = get_object_or_404(Ride.objects.select_related("client"), pk=ride_id, driver=driver)
-    review = DriverReview.objects.filter(ride=ride, driver=driver).select_related("client").first()
+    allowed_drivers = Profile.objects.filter(Q(pk=driver.pk) | Q(fleet_owner=driver)) if driver.is_fleet_owner else Profile.objects.filter(pk=driver.pk)
+    ride = get_object_or_404(Ride.objects.select_related("client", "driver"), pk=ride_id, driver__in=allowed_drivers)
+    review = DriverReview.objects.filter(ride=ride, driver=ride.driver).select_related("client").first()
     client_photo = ride.client.profile_photo_url or ride.client.avatar_url
     try:
         stops = list(RideStop.objects.filter(ride=ride))
@@ -736,7 +734,7 @@ def driver_profile(request):
         try:
             changed_files = {
                 name
-                for name in ["identification_file", "license_file", "registration_file", "insurance_file"]
+                for name in ["identification_file", "license_file", "registration_file", "insurance_file", "permit_file"]
                 if profile_form.cleaned_data.get(name)
             }
             driver = profile_form.save(commit=False)
@@ -785,119 +783,79 @@ def driver_earnings(request):
     period = request.GET.get("period", "week")
     if period not in {"day", "week", "month", "year"}:
         period = "week"
-    completed = Ride.objects.filter(driver=driver, status__in=COMPLETED_RIDE_STATUSES).select_related("client").order_by("-completed_at")
+    fleet_profiles = Profile.objects.filter(Q(pk=driver.pk) | Q(fleet_owner=driver)) if driver.is_fleet_owner else Profile.objects.filter(pk=driver.pk)
+    completed = Ride.objects.filter(driver__in=fleet_profiles, status__in=COMPLETED_RIDE_STATUSES).select_related("client", "driver").order_by("-completed_at")
     selected, start, end = _earnings_period(completed, period)
-    vehicle_id = request.GET.get("vehicle", "")
-    # Las carreras históricas sin fleet_vehicle_id siguen incluyéndose en el total general.
-    if vehicle_id:
-        selected = selected.filter(fleet_vehicle_id=vehicle_id)
+    driver_profile_id = request.GET.get("driver_profile", "")
+    if driver_profile_id:
+        selected = selected.filter(driver_id=driver_profile_id)
     totals = selected.aggregate(total=Sum(Coalesce("driver_price", "price")), distance=Sum("distance_km"), trips=Count("id"))
     if request.GET.get("export") == "csv":
         response = HttpResponse(content_type="text/csv; charset=utf-8")
         response["Content-Disposition"] = f'attachment; filename="ganancias_movix_{period}_{start}.csv"'
         response.write("\ufeff")
         writer = csv.writer(response)
-        writer.writerow(["Fecha", "Carrera", "Cliente", "Origen", "Destino", "Distancia km", "Ganancia USD"])
+        writer.writerow(["Fecha", "Carrera", "Chofer", "Placa", "Cliente", "Origen", "Destino", "Distancia km", "Ganancia USD"])
         for ride in selected:
-            writer.writerow([ride.completed_at, ride.id, ride.client.full_name, ride.origin_address, ride.destination_address, ride.distance_km or 0, ride.effective_price])
+            writer.writerow([ride.completed_at, ride.id, ride.driver.full_name, ride.driver.vehicle_plate, ride.client.full_name, ride.origin_address, ride.destination_address, ride.distance_km or 0, ride.effective_price])
         return response
-    try:
-        vehicles = FleetVehicle.objects.filter(owner=driver)
-    except DatabaseError:
-        vehicles = []
     return render(request, "driver/earnings.html", {
         **_driver_common_context(driver), "period": period, "start": start, "end": end,
         "rides": selected, "total": totals["total"] or Decimal("0"), "trip_count": totals["trips"] or 0,
-        "distance": totals["distance"] or Decimal("0"), "vehicles": vehicles, "vehicle_id": vehicle_id,
+        "distance": totals["distance"] or Decimal("0"), "fleet_profiles": fleet_profiles,
+        "driver_profile_id": driver_profile_id,
     })
 
 
 @driver_portal_required
 def driver_fleet(request):
-    owner = _current_driver(request)
+    driver = _current_driver(request)
     try:
-        vehicles = FleetVehicle.objects.filter(owner=owner)
-        drivers = FleetDriver.objects.filter(owner=owner).select_related("vehicle")
-        vehicle_page = Paginator(vehicles, 10).get_page(request.GET.get("vehicle_page"))
-        driver_page = Paginator(drivers, 10).get_page(request.GET.get("driver_page"))
+        fleet_owner = driver if driver.is_fleet_owner else driver.fleet_owner
+        if driver.is_fleet_owner:
+            members = Profile.objects.filter(fleet_owner=driver).select_related("fleet_owner").order_by("first_name", "last_name")
+            vehicle_profiles = Profile.objects.filter(Q(pk=driver.pk) | Q(fleet_owner=driver)).exclude(vehicle_plate__isnull=True).exclude(vehicle_plate="").order_by("first_name")
+        else:
+            members = Profile.objects.filter(pk=driver.pk).select_related("fleet_owner")
+            vehicle_profiles = Profile.objects.filter(pk=driver.pk).exclude(vehicle_plate__isnull=True).exclude(vehicle_plate="")
+        vehicle_page = Paginator(vehicle_profiles, 10).get_page(request.GET.get("vehicle_page"))
+        driver_page = Paginator(members, 10).get_page(request.GET.get("driver_page"))
     except DatabaseError:
-        vehicles, drivers = [], []
+        fleet_owner = None
         vehicle_page = driver_page = None
         messages.warning(request, "La estructura de flota aún no está disponible en la base de datos.")
     return render(request, "driver/fleet.html", {
-        **_driver_common_context(owner), "vehicles": vehicles, "fleet_drivers": drivers,
+        **_driver_common_context(driver), "fleet_owner": fleet_owner,
         "vehicle_page": vehicle_page, "driver_page": driver_page,
     })
 
 
 @admin_required
 def admin_fleet(request):
-    """El administrador es el único que registra, agrupa y modifica flotas."""
-    owners = _profile_queryset("drivers").order_by("first_name", "last_name")
-    action = request.POST.get("action", "")
-    vehicle_form = AdminFleetVehicleForm(
-        request.POST if action == "create_vehicle" else None, owners=owners
-    )
-    driver_form = AdminFleetDriverForm(
-        request.POST if action == "create_driver" else None, owners=owners
-    )
-    try:
-        if request.method == "POST" and action == "create_vehicle" and vehicle_form.is_valid():
-            vehicle = vehicle_form.save(commit=False)
-            vehicle.id = uuid.uuid4()
-            vehicle.owner = vehicle_form.cleaned_data["owner"]
-            vehicle.created_at = vehicle.updated_at = timezone.now()
-            vehicle.save(force_insert=True)
-            audit(request, "create", "fleet_vehicle", f"Registró el vehículo {vehicle.plate}", vehicle.id)
-            messages.success(request, "Vehículo registrado y agrupado con su propietario.")
-            return redirect("panel:admin_fleet")
-        if request.method == "POST" and action == "create_driver" and driver_form.is_valid():
-            fleet_driver = driver_form.save(commit=False)
-            fleet_driver.id = uuid.uuid4()
-            fleet_driver.owner = driver_form.cleaned_data["owner"]
-            fleet_driver.created_at = fleet_driver.updated_at = timezone.now()
-            fleet_driver.save(force_insert=True)
-            audit(request, "create", "fleet_driver", f"Creó el chofer {fleet_driver.full_name}", fleet_driver.id)
-            messages.success(request, "Chofer creado y asignado por el administrador.")
-            return redirect("panel:admin_fleet")
-        if request.method == "POST" and action in {"toggle_vehicle", "toggle_driver", "delete_vehicle", "delete_driver"}:
-            is_vehicle = action.endswith("vehicle")
-            model = FleetVehicle if is_vehicle else FleetDriver
-            item = get_object_or_404(model, pk=request.POST.get("id"))
-            if action.startswith("delete"):
-                label = item.plate if is_vehicle else item.full_name
-                item.delete()
-                audit(request, "delete", model._meta.model_name, f"Eliminó {label}")
-                messages.success(request, "Registro eliminado.")
-            else:
-                item.is_active = not item.is_active
-                item.updated_at = timezone.now()
-                item.save(update_fields=["is_active", "updated_at"])
-                messages.success(request, "Estado actualizado.")
-            return redirect("panel:admin_fleet")
-    except DatabaseError:
-        messages.error(request, "Ejecuta sql/021_movix_admin_fleet_payments.sql en Supabase.")
-
+    """Agrupa perfiles reales de transportista por dueño o compañía."""
     query = request.GET.get("q", "").strip()
-    vehicle_qs = FleetVehicle.objects.select_related("owner").order_by("owner__first_name", "plate")
-    driver_qs = FleetDriver.objects.select_related("owner", "vehicle").order_by("owner__first_name", "first_name")
+    owners = _profile_queryset("drivers").filter(is_fleet_owner=True).order_by("company_name", "first_name", "last_name")
+    driver_qs = _profile_queryset("drivers").filter(fleet_owner__isnull=False).select_related("fleet_owner").order_by("fleet_owner__company_name", "first_name")
+    vehicle_qs = _profile_queryset("drivers").filter(Q(is_fleet_owner=True) | Q(fleet_owner__isnull=False)).exclude(vehicle_plate__isnull=True).exclude(vehicle_plate="").select_related("fleet_owner").order_by("company_name", "vehicle_plate")
     if query:
-        vehicle_qs = vehicle_qs.filter(Q(plate__icontains=query) | Q(alias__icontains=query) | Q(owner__first_name__icontains=query) | Q(owner__last_name__icontains=query))
-        driver_qs = driver_qs.filter(Q(first_name__icontains=query) | Q(last_name__icontains=query) | Q(identification_number__icontains=query) | Q(owner__first_name__icontains=query) | Q(owner__last_name__icontains=query))
+        owner_filter = Q(first_name__icontains=query) | Q(last_name__icontains=query) | Q(company_name__icontains=query)
+        owners = owners.filter(owner_filter)
+        driver_qs = driver_qs.filter(Q(first_name__icontains=query) | Q(last_name__icontains=query) | Q(identification_number__icontains=query) | Q(fleet_owner__first_name__icontains=query) | Q(fleet_owner__company_name__icontains=query))
+        vehicle_qs = vehicle_qs.filter(Q(vehicle_plate__icontains=query) | Q(first_name__icontains=query) | Q(last_name__icontains=query) | Q(fleet_owner__company_name__icontains=query))
     owner_rows = []
     for owner in owners:
+        members = Profile.objects.filter(fleet_owner=owner)
         owner_rows.append({
             "owner": owner,
-            "vehicle_count": FleetVehicle.objects.filter(owner=owner).count(),
-            "driver_count": FleetDriver.objects.filter(owner=owner).count(),
+            "vehicle_count": members.exclude(vehicle_plate__isnull=True).exclude(vehicle_plate="").count() + (1 if owner.vehicle_plate else 0),
+            "driver_count": members.count(),
         })
     return render(request, "panel/fleet.html", {
-        "vehicle_form": vehicle_form,
-        "driver_form": driver_form,
         "owner_page": Paginator(owner_rows, 10).get_page(request.GET.get("owner_page")),
         "vehicle_page": Paginator(vehicle_qs, 10).get_page(request.GET.get("vehicle_page")),
         "driver_page": Paginator(driver_qs, 10).get_page(request.GET.get("driver_page")),
         "query": query,
+        "ungrouped_count": _profile_queryset("drivers").filter(is_fleet_owner=False, fleet_owner__isnull=True).count(),
     })
 
 
@@ -915,9 +873,8 @@ def driver_payments(request):
     )
     if request.method == "POST" and form.is_valid():
         period = form.cleaned_data["period"]
-        vehicle = form.cleaned_data["vehicle"]
-        if DriverMonthlyPayment.objects.filter(driver=driver, vehicle=vehicle, period=period).exists():
-            form.add_error("period", "Ya registraste el pago mensual de este vehículo. El administrador debe revisarlo.")
+        if DriverMonthlyPayment.objects.filter(driver=driver, period=period).exists():
+            form.add_error("period", "Ya registraste el pago mensual de tu vehículo. El administrador debe revisarlo.")
         else:
             receipt_value = ""
             try:
@@ -932,7 +889,7 @@ def driver_payments(request):
                 payment = form.save(commit=False)
                 payment.id = uuid.uuid4()
                 payment.driver = driver
-                payment.vehicle = vehicle
+                payment.vehicle = None
                 payment.receipt_url = receipt_value or None
                 payment.status = DriverMonthlyPayment.STATUS_PENDING
                 payment.created_at = timezone.now()
@@ -964,8 +921,7 @@ def driver_payments(request):
         "form": form,
         "page": page,
         "payment_status": payment_status,
-        "current_payments": DriverMonthlyPayment.objects.filter(driver=driver, period=current_period).select_related("vehicle"),
-        "active_vehicle_count": FleetVehicle.objects.filter(owner=driver, is_active=True).count(),
+        "current_payment": DriverMonthlyPayment.objects.filter(driver=driver, period=current_period).first(),
         "bank_cards": bank_cards,
     })
 
@@ -1033,35 +989,30 @@ def monthly_payment_list(request):
             | Q(email__icontains=query) | Q(identification_number__icontains=query)
             | Q(cedula__icontains=query)
         )
-    current_payments = {
-        (payment.driver_id, payment.vehicle_id): payment
-        for payment in DriverMonthlyPayment.objects.filter(period=current_period).select_related("vehicle")
-    }
+    current_payments = {}
+    for payment in DriverMonthlyPayment.objects.filter(period=current_period).order_by("-created_at"):
+        current_payments.setdefault(payment.driver_id, payment)
     rows = []
     due_count = 0
     unpaid_count = 0
     for driver in drivers:
-        vehicles = list(FleetVehicle.objects.filter(owner=driver, is_active=True))
-        if not vehicles:
-            vehicles = [None]
-        for vehicle in vehicles:
-            due_count += 1
-            payment = current_payments.get((driver.id, vehicle.id if vehicle else None))
-            row_status = payment.status if payment else "unpaid"
-            if row_status == "unpaid":
-                unpaid_count += 1
-            if status != "all" and row_status != status:
-                continue
-            if bank_filter != "all" and (not payment or payment.bank != bank_filter):
-                continue
-            avatar_value = driver.profile_photo_url or driver.avatar_url
-            rows.append({
-                "driver": driver, "vehicle": vehicle, "payment": payment, "status": row_status,
-                "avatar_url": resolve_media_url(
-                    avatar_value, expires=900,
-                    preferred_buckets=(settings.SUPABASE_PUBLIC_BUCKET, settings.SUPABASE_PRIVATE_BUCKET),
-                ) if avatar_value else "",
-            })
+        due_count += 1
+        payment = current_payments.get(driver.id)
+        row_status = payment.status if payment else "unpaid"
+        if row_status == "unpaid":
+            unpaid_count += 1
+        if status != "all" and row_status != status:
+            continue
+        if bank_filter != "all" and (not payment or payment.bank != bank_filter):
+            continue
+        avatar_value = driver.profile_photo_url or driver.avatar_url
+        rows.append({
+            "driver": driver, "payment": payment, "status": row_status,
+            "avatar_url": resolve_media_url(
+                avatar_value, expires=900,
+                preferred_buckets=(settings.SUPABASE_PUBLIC_BUCKET, settings.SUPABASE_PRIVATE_BUCKET),
+            ) if avatar_value else "",
+        })
     page = Paginator(rows, 10).get_page(request.GET.get("page"))
     counts = {
         "all": due_count,
@@ -1127,8 +1078,6 @@ def monthly_payment_review(request, payment_id, decision):
 @require_POST
 def monthly_payment_physical(request, profile_id):
     driver = get_object_or_404(_profile_queryset("drivers"), pk=profile_id)
-    vehicle_id = request.POST.get("vehicle_id") or None
-    vehicle = get_object_or_404(FleetVehicle, pk=vehicle_id, owner=driver) if vehicle_id else None
     try:
         period = datetime.strptime(request.POST.get("period", ""), "%Y-%m").date().replace(day=1)
     except ValueError:
@@ -1142,7 +1091,6 @@ def monthly_payment_physical(request, profile_id):
         return redirect("panel:monthly_payment_list")
     payment, created = DriverMonthlyPayment.objects.get_or_create(
         driver=driver,
-        vehicle=vehicle,
         period=period,
         defaults={
             "id": uuid.uuid4(), "bank": "physical", "payment_method": "cash", "amount": amount,
@@ -1677,6 +1625,7 @@ def _upload_profile_files(profile, form, kind):
         "license_file": "license_photo_url",
         "registration_file": "registration_photo_url",
         "insurance_file": "insurance_photo_url",
+        "permit_file": "permit_photo_url",
     }
     replacements = []
     try:
@@ -1825,7 +1774,7 @@ def profile_detail(request, kind, profile_id):
     show_all_reviews = request.GET.get("reviews") == "all"
     reviews = review_queryset if show_all_reviews else review_queryset[:4]
     ride_count = Ride.objects.filter(driver=profile).count() if kind == "drivers" else Ride.objects.filter(client=profile).count()
-    summary_keys = ("identification", "vehicle") if profile.is_driver else ("identification",)
+    summary_keys = ("identification", "vehicle", "permit") if profile.is_driver else ("identification",)
     return render(request, "panel/profile_detail.html", {
         "kind": kind,
         "config": config,
@@ -1844,7 +1793,12 @@ def profile_detail(request, kind, profile_id):
 def profile_create(request, kind):
     config = _kind_config(kind)
     role = config["role"]
-    form = ProfileCreateForm(request.POST or None, request.FILES or None, role=role)
+    form = ProfileCreateForm(
+        request.POST or None,
+        request.FILES or None,
+        role=role,
+        allow_fleet_assignment=kind == "drivers",
+    )
     if request.method == "POST" and form.is_valid():
         if Profile.objects.filter(email__iexact=form.cleaned_data["email"]).exists():
             form.add_error("email", "Ya existe un perfil con este correo electrónico.")
@@ -1894,7 +1848,13 @@ def profile_create(request, kind):
 def profile_edit(request, kind, profile_id):
     config = _kind_config(kind)
     profile = get_object_or_404(_profile_queryset(kind), pk=profile_id)
-    form = ProfileForm(request.POST or None, request.FILES or None, instance=profile, role=config["role"])
+    form = ProfileForm(
+        request.POST or None,
+        request.FILES or None,
+        instance=profile,
+        role=config["role"],
+        allow_fleet_assignment=kind == "drivers",
+    )
     if request.method == "POST" and form.is_valid():
         replacements = []
         try:

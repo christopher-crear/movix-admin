@@ -27,7 +27,8 @@ El sistema utiliza las tablas existentes de la app móvil (`profiles`, `rides`, 
 - Encomiendas multipunto con varias recogidas y entregas ordenadas, contacto por parada y tiempo en horas/minutos.
 - Rangos automáticos `MOVIX Inicial`, `MOVIX Pro` y `Estrella MOVIX` para clientes y transportistas.
 - Alerta visible para transportistas y administradores cuando un cliente tiene menos de 3 estrellas.
-- Gestión de flotas: varios vehículos, perfiles de choferes, asignación de unidad y reportes filtrables por vehículo.
+- Gestión de flotas por compañía: el dueño y cada chofer son perfiles completos de transportista con acceso propio a la app; el administrador únicamente los agrupa y los vehículos se obtienen de cada perfil.
+- Permiso de operación cargable como fotografía o PDF, disponible en verificación documental.
 - Listado paginado de carreras asignadas, filtros y detalle completo de cada servicio.
 - Comentarios y calificaciones reales de `driver_reviews` con distribución por estrellas.
 - Perfil del transportista con vehículo, documentos, edición y cambio de contraseña de Supabase.
@@ -73,6 +74,7 @@ nueva ejecuta, en este orden:
 sql/supabase_panel.sql
 sql/020_movix_routes_ranks_fleet.sql
 sql/021_movix_admin_fleet_payments.sql
+sql/022_movix_profile_fleets_and_permits.sql
 ```
 
 El script puede ejecutarse más de una vez. No elimina información existente.
@@ -87,6 +89,7 @@ sql/monthly_payments.sql
 sql/payment_banks_inbox_invoices.sql
 sql/020_movix_routes_ranks_fleet.sql
 sql/021_movix_admin_fleet_payments.sql
+sql/022_movix_profile_fleets_and_permits.sql
 ```
 
 El segundo archivo crea las tablas `payment_bank_accounts`, `driver_invoices`
@@ -99,10 +102,17 @@ cuentas**, completa los datos reales y activa únicamente los que usarás.
 índices y políticas RLS. También convierte cada carrera antigua en una ruta de
 dos paradas sin borrar ni modificar sus direcciones originales.
 
-`021_movix_admin_fleet_payments.sql` deja la flota en modo de consulta para el
-propietario y reserva su creación, agrupación y eliminación al administrador;
-además crea una mensualidad independiente por vehículo, validaciones de formato
-y notificaciones administrativas que se eliminan al abrirlas.
+`021_movix_admin_fleet_payments.sql` incorpora la base de pagos mensuales,
+validaciones de formato, control administrativo y notificaciones que se eliminan
+al abrirlas. La estructura auxiliar de flota de esta etapa se migra al modelo
+definitivo mediante el archivo siguiente.
+
+`022_movix_profile_fleets_and_permits.sql` aplica el modelo definitivo de
+flotas: agrega `is_fleet_owner` y `fleet_owner_id` a `profiles`, protege la
+agrupación para que solo la cambie el administrador y agrega el documento
+`permit_photo_url`. Cada chofer conserva una cuenta real de Supabase Auth, su
+vehículo y todas las funciones normales de transportista. La mensualidad se
+registra por cada perfil de transportista y, por tanto, por su vehículo.
 
 Los rangos se calculan así: **Estrella MOVIX** desde 100 carreras y 4,7;
 **MOVIX Pro** desde 40 carreras y 4,3; los demás perfiles usan **MOVIX Inicial**.

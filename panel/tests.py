@@ -15,8 +15,6 @@ from django.urls import reverse
 from django.utils import timezone
 
 from .forms import (
-    FleetDriverForm,
-    FleetVehicleForm,
     DriverSelfProfileForm,
     PasswordRecoveryRequestForm,
     PasswordResetConfirmForm,
@@ -219,13 +217,14 @@ class FormTests(SimpleTestCase):
         self.assertNotIsInstance(form.fields["first_name"].widget, forms.Textarea)
         self.assertIsInstance(form.fields["email"].widget, forms.EmailInput)
 
-    def test_fleet_text_fields_are_single_line_inputs(self):
-        vehicle = FleetVehicleForm()
-        driver = FleetDriverForm()
-        for field_name in ("alias", "plate", "permit_number"):
-            self.assertIsInstance(vehicle.fields[field_name].widget, forms.TextInput)
-        for field_name in ("first_name", "last_name", "identification_number", "license_number", "phone"):
-            self.assertIsInstance(driver.fields[field_name].widget, forms.TextInput)
+    def test_only_admin_profile_form_exposes_fleet_assignment(self):
+        admin_form = ProfileCreateForm(role="transportista", allow_fleet_assignment=True)
+        public_form = PublicDriverRegistrationForm()
+        self.assertIn("is_fleet_owner", admin_form.fields)
+        self.assertIn("fleet_owner", admin_form.fields)
+        self.assertNotIn("is_fleet_owner", public_form.fields)
+        self.assertNotIn("fleet_owner", public_form.fields)
+        self.assertIn("permit_file", public_form.fields)
 
     def test_ecuador_plate_is_normalized_and_invalid_phone_is_rejected(self):
         form = ProfileForm(
@@ -457,6 +456,32 @@ class PanelIntegrationTests(TransactionTestCase):
         self.assertContains(detail, "1 h 15 min")
         self.assertEqual(self.client.get(reverse("panel:driver_earnings")).status_code, 200)
         self.assertEqual(self.client.get(reverse("panel:driver_fleet")).status_code, 200)
+
+    def test_fleet_owner_sees_real_driver_profiles_and_their_earnings(self):
+        self.driver_profile.is_fleet_owner = True
+        self.driver_profile.company_name = "Transportes Eras"
+        self.driver_profile.save(update_fields=["is_fleet_owner", "company_name"])
+        member = Profile.objects.create(
+            id=uuid.uuid4(), role="transportista", first_name="Daniel", last_name="Vera",
+            email="daniel.fleet@example.com", identification_number="1106056011",
+            license_number="1106056011", vehicle_plate="LBA-1234", vehicle_type="camioneta",
+            fleet_owner=self.driver_profile, is_active=True, created_at=timezone.now(), updated_at=timezone.now(),
+        )
+        ride = self._create_driver_ride(driver=member)
+        self._open_driver_session()
+
+        fleet = self.client.get(reverse("panel:driver_fleet"))
+        self.assertContains(fleet, member.full_name)
+        self.assertContains(fleet, member.vehicle_plate)
+        earnings = self.client.get(reverse("panel:driver_earnings"))
+        self.assertContains(earnings, member.full_name)
+        self.assertContains(earnings, "15,00")
+        self.assertEqual(self.client.get(reverse("panel:driver_ride_detail", args=[ride.id])).status_code, 200)
+
+        self.client.force_login(self.admin)
+        admin_fleet = self.client.get(reverse("panel:admin_fleet"))
+        self.assertContains(admin_fleet, "Transportes Eras")
+        self.assertContains(admin_fleet, member.full_name)
 
     @patch("panel.views.send_movix_email")
     def test_driver_password_recovery_sends_custom_movix_link(self, send_email):
@@ -947,7 +972,7 @@ class PanelIntegrationTests(TransactionTestCase):
         self.assertContains(detail, "asset-preview-name")
         self.assertContains(detail, "asset-preview-download")
         self.assertContains(detail, "movix-critical-media-v60")
-        self.assertContains(detail, "app.css?v=20260810-140", html=False)
+        self.assertContains(detail, "app.css?v=20260824-4", html=False)
         self.assertContains(detail, "app.js?v=20260810-140", html=False)
         self.assertContains(detail, ".document-preview-stage.show-pdf>img{display:none!important}", html=False)
 

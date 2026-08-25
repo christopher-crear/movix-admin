@@ -55,7 +55,18 @@ class Profile(models.Model):
     verification_rejection_reason = models.TextField(blank=True, null=True)
     permit_number = models.TextField(blank=True, null=True)
     permit_details = models.TextField(blank=True, null=True)
+    permit_photo_url = models.TextField(blank=True, null=True)
     company_name = models.TextField(blank=True, null=True)
+    is_fleet_owner = models.BooleanField(default=False)
+    fleet_owner = models.ForeignKey(
+        "self",
+        models.SET_NULL,
+        db_column="fleet_owner_id",
+        related_name="fleet_members",
+        blank=True,
+        null=True,
+        db_constraint=False,
+    )
 
     class Meta:
         managed = False
@@ -141,6 +152,14 @@ class Profile(models.Model):
     @property
     def low_rating_alert(self):
         return not self.is_driver and float(self.rating or 0) < 3
+
+    @property
+    def fleet_role_label(self):
+        if self.is_fleet_owner:
+            return "Dueño de flota"
+        if self.fleet_owner_id:
+            return f"Chofer de {self.fleet_owner.full_name}"
+        return "Transportista independiente"
 
     def __str__(self):
         return self.full_name
