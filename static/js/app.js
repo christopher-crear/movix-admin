@@ -17,6 +17,20 @@
   document.addEventListener('click', event => { if (!event.target.closest('.dropdown') && !event.target.closest('[data-dropdown-toggle]')) document.querySelectorAll('.dropdown.open').forEach(el => el.classList.remove('open')); });
   document.querySelectorAll('[data-dismiss]').forEach(button => button.addEventListener('click', () => button.closest('.alert')?.remove()));
 
+  // El número se guarda como 09XXXXXXXX, pero la persona solo escribe los
+  // nueve dígitos nacionales después del prefijo ecuatoriano fijo.
+  document.querySelectorAll('input[data-ecuador-phone]').forEach(input => {
+    if (input.parentElement?.classList.contains('phone-country-field')) return;
+    const field = document.createElement('span');
+    field.className = 'phone-country-field';
+    const prefix = document.createElement('span');
+    prefix.className = 'phone-country-prefix';
+    prefix.textContent = '🇪🇨 +593';
+    input.parentNode.insertBefore(field, input);
+    field.append(prefix, input);
+    input.addEventListener('input', () => { input.value = input.value.replace(/\D/g, '').replace(/^0/, '').slice(0, 9); });
+  });
+
   const dialog = document.getElementById('confirmDialog'); let pendingForm = null;
   document.querySelectorAll('form[data-confirm]').forEach(form => form.addEventListener('submit', event => {
     if (form.dataset.confirmed === 'true') return;

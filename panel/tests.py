@@ -972,8 +972,8 @@ class PanelIntegrationTests(TransactionTestCase):
         self.assertContains(detail, "asset-preview-name")
         self.assertContains(detail, "asset-preview-download")
         self.assertContains(detail, "movix-critical-media-v60")
-        self.assertContains(detail, "app.css?v=20260824-4", html=False)
-        self.assertContains(detail, "app.js?v=20260810-140", html=False)
+        self.assertContains(detail, "app.css?v=20260824-5", html=False)
+        self.assertContains(detail, "app.js?v=20260824-5", html=False)
         self.assertContains(detail, ".document-preview-stage.show-pdf>img{display:none!important}", html=False)
 
         profile = self.client.get(reverse("panel:profile_detail", args=["users", self.user_profile.id]))

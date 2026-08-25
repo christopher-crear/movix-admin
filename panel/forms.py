@@ -54,10 +54,12 @@ def validate_name(value, label="Este campo"):
 def validate_ecuador_phone(value):
     value = re.sub(r"[\s()-]", "", value or "")
     if value.startswith("+593"):
-        value = "0" + value[4:]
-    if not re.fullmatch(r"09\d{8}", value):
-        raise forms.ValidationError("Ingresa un celular ecuatoriano de 10 dígitos que empiece con 09.")
-    return value
+        value = value[4:]
+    if value.startswith("09"):
+        value = value[1:]
+    if re.fullmatch(r"9\d{8}", value):
+        return "0" + value
+    raise forms.ValidationError("Ingresa los 9 dígitos de tu celular ecuatoriano empezando con 9.")
 
 
 def validate_ecuador_plate(value):
@@ -129,7 +131,7 @@ class ProfileForm(StyledFormMixin, forms.ModelForm):
             "first_name": forms.TextInput(attrs={"maxlength": 80, "autocomplete": "given-name", "data-letters-only": "true"}),
             "last_name": forms.TextInput(attrs={"maxlength": 80, "autocomplete": "family-name", "data-letters-only": "true"}),
             "email": forms.EmailInput(attrs={"maxlength": 160, "autocomplete": "email"}),
-            "phone": forms.TextInput(attrs={"maxlength": 10, "inputmode": "numeric", "autocomplete": "tel", "data-digits-only": "true", "placeholder": "09XXXXXXXX"}),
+            "phone": forms.TextInput(attrs={"maxlength": 9, "inputmode": "numeric", "autocomplete": "tel-national", "data-digits-only": "true", "data-ecuador-phone": "true", "placeholder": "9XXXXXXXX"}),
             "identification_number": forms.TextInput(attrs={"maxlength": 10, "inputmode": "numeric", "data-digits-only": "true"}),
             "license_number": forms.TextInput(attrs={"maxlength": 10, "inputmode": "numeric", "data-digits-only": "true"}),
             "vehicle_plate": forms.TextInput(attrs={"maxlength": 8, "data-ecuador-plate": "true", "placeholder": "ABC-1234"}),
@@ -145,6 +147,10 @@ class ProfileForm(StyledFormMixin, forms.ModelForm):
     def __init__(self, *args, role="cliente", allow_fleet_assignment=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.role = role
+        if not self.is_bound and "phone" in self.fields:
+            phone = str(self.initial.get("phone") or getattr(self.instance, "phone", "") or "")
+            if phone.startswith("09"):
+                self.initial["phone"] = phone[1:]
         if role not in {"driver", "conductor", "transportista"}:
             for name in [
                 "license_number",

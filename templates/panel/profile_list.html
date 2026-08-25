@@ -6,6 +6,7 @@
 <form class="filter-bar" method="get" data-auto-search data-min-length="2">
     <div class="filter-search"><svg><use href="#i-search"/></svg><input type="search" name="q" value="{{ query }}" placeholder="Escribe al menos 2 letras..." autocomplete="off"></div>
     <input type="hidden" name="status" value="{{ status }}" data-filter-input>
+    <label class="per-page-filter">Mostrar <select class="form-control" name="per_page" onchange="this.form.submit()">{% for option in page_size_options %}<option value="{{ option }}" {% if per_page == option|stringformat:'s' %}selected{% endif %}>{% if option == 'all' %}Todos{% else %}{{ option }}{% endif %}</option>{% endfor %}</select></label>
     <div class="segmented">
         <button type="button" data-filter-value="all" class="{% if status == 'all' %}active{% endif %}">Todos</button>
         <button type="button" data-filter-value="active" class="{% if status == 'active' %}active{% endif %}">Activos</button>
@@ -30,6 +31,6 @@
     {% empty %}<tr><td colspan="8"><div class="empty-state"><svg><use href="#i-users"/></svg><strong>No encontramos registros</strong><span>Prueba otro filtro o crea el primer registro.</span></div></td></tr>{% endfor %}
     </tbody>
 </table></div>
-{% if page.paginator.num_pages > 1 %}<nav class="pagination">{% if page.has_previous %}<a href="?q={{ query|urlencode }}&status={{ status }}&page={{ page.previous_page_number }}">Anterior</a>{% endif %}<span>Página {{ page.number }} de {{ page.paginator.num_pages }}</span>{% if page.has_next %}<a href="?q={{ query|urlencode }}&status={{ status }}&page={{ page.next_page_number }}">Siguiente</a>{% endif %}</nav>{% endif %}
+{% if page.paginator.num_pages > 1 %}<nav class="pagination">{% if page.has_previous %}<a href="?q={{ query|urlencode }}&status={{ status }}&per_page={{ per_page }}&page={{ page.previous_page_number }}">Anterior</a>{% endif %}<span>Página {{ page.number }} de {{ page.paginator.num_pages }}</span>{% if page.has_next %}<a href="?q={{ query|urlencode }}&status={{ status }}&per_page={{ per_page }}&page={{ page.next_page_number }}">Siguiente</a>{% endif %}</nav>{% endif %}
 </div>
 {% endblock %}

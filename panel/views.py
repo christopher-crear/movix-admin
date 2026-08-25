@@ -568,6 +568,42 @@ def _ride_earnings(queryset):
     return amount or Decimal("0")
 
 
+PAGE_SIZE_OPTIONS = (10, 25, 100, "all")
+
+
+def _page_size(request, default=10):
+    """Obtiene un tamaño de página seguro sin permitir valores arbitrarios."""
+    value = request.GET.get("per_page", str(default))
+    if value == "all":
+        return "all"
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return default
+    return value if value in PAGE_SIZE_OPTIONS else default
+
+
+def _paginate(request, queryset, default=10, page_param="page"):
+    per_page = _page_size(request, default)
+    if per_page == "all":
+        # Se conserva una sola página para que el control sea consistente.
+        per_page = max(queryset.count(), 1)
+    return Paginator(queryset, per_page).get_page(request.GET.get(page_param)), request.GET.get("per_page", str(default))
+
+
+def _attach_ride_route_points(rides):
+    """Evita consultas por fila y expone todos los puntos de una carrera."""
+    for ride in rides:
+        stops = list(ride.stops.all())
+        if not stops:
+            stops = [
+                {"type_label": "Recogida", "sequence": 1, "address": ride.origin_address},
+                {"type_label": "Entrega", "sequence": 1, "address": ride.destination_address},
+            ]
+        ride.route_points = stops
+    return rides
+
+
 def _driver_common_context(driver):
     avatar_value = driver.profile_photo_url or driver.avatar_url
     return {
@@ -653,9 +689,11 @@ def driver_dashboard(request):
 @driver_portal_required
 def driver_rides(request):
     driver = _current_driver(request)
-    queryset = Ride.objects.filter(driver=driver).select_related("client").order_by("-created_at")
+    queryset = Ride.objects.filter(driver=driver).select_related("client").prefetch_related("stops").order_by("-created_at")
     query = request.GET.get("q", "").strip()
     status = request.GET.get("status", "all")
+    date_value = request.GET.get("date", "").strip()
+    month_value = request.GET.get("month", "").strip()
     if query:
         queryset = queryset.filter(Q(origin_address__icontains=query) | Q(destination_address__icontains=query) | Q(cargo_description__icontains=query))
     if status == "completed":
@@ -664,8 +702,25 @@ def driver_rides(request):
         queryset = queryset.filter(status__in=CANCELLED_RIDE_STATUSES)
     elif status == "active":
         queryset = queryset.exclude(status__in=COMPLETED_RIDE_STATUSES + CANCELLED_RIDE_STATUSES)
-    page = Paginator(queryset, 10).get_page(request.GET.get("page"))
-    context = {**_driver_common_context(driver), "page": page, "query": query, "status": status}
+    try:
+        if date_value:
+            queryset = queryset.filter(created_at__date=datetime.strptime(date_value, "%Y-%m-%d").date())
+    except ValueError:
+        date_value = ""
+    try:
+        if month_value:
+            month_start = datetime.strptime(month_value, "%Y-%m").date().replace(day=1)
+            next_month = (month_start.replace(day=28) + timedelta(days=4)).replace(day=1)
+            queryset = queryset.filter(created_at__date__gte=month_start, created_at__date__lt=next_month)
+    except ValueError:
+        month_value = ""
+    page, per_page = _paginate(request, queryset, 10)
+    _attach_ride_route_points(page.object_list)
+    context = {
+        **_driver_common_context(driver), "page": page, "query": query, "status": status,
+        "date_value": date_value, "month_value": month_value, "per_page": per_page,
+        "page_size_options": PAGE_SIZE_OPTIONS,
+    }
     return render(request, "driver/rides.html", context)
 
 
@@ -786,6 +841,28 @@ def driver_earnings(request):
     fleet_profiles = Profile.objects.filter(Q(pk=driver.pk) | Q(fleet_owner=driver)) if driver.is_fleet_owner else Profile.objects.filter(pk=driver.pk)
     completed = Ride.objects.filter(driver__in=fleet_profiles, status__in=COMPLETED_RIDE_STATUSES).select_related("client", "driver").order_by("-completed_at")
     selected, start, end = _earnings_period(completed, period)
+    month_value = request.GET.get("month", "").strip()
+    year_value = request.GET.get("year", "").strip()
+    try:
+        if month_value:
+            start = datetime.strptime(month_value, "%Y-%m").date().replace(day=1)
+            next_month = (start.replace(day=28) + timedelta(days=4)).replace(day=1)
+            end = next_month - timedelta(days=1)
+            selected = completed.filter(completed_at__date__gte=start, completed_at__date__lt=next_month)
+            period = "month"
+    except ValueError:
+        month_value = ""
+    if not month_value:
+        try:
+            if year_value:
+                year = int(year_value)
+                if not 2000 <= year <= timezone.localdate().year:
+                    raise ValueError
+                start, end = datetime(year, 1, 1).date(), datetime(year, 12, 31).date()
+                selected = completed.filter(completed_at__date__gte=start, completed_at__date__lte=end)
+                period = "year"
+        except (TypeError, ValueError):
+            year_value = ""
     driver_profile_id = request.GET.get("driver_profile", "")
     if driver_profile_id:
         selected = selected.filter(driver_id=driver_profile_id)
@@ -796,14 +873,21 @@ def driver_earnings(request):
         response.write("\ufeff")
         writer = csv.writer(response)
         writer.writerow(["Fecha", "Carrera", "Chofer", "Placa", "Cliente", "Origen", "Destino", "Distancia km", "Ganancia USD"])
+        selected = selected.prefetch_related("stops")
+        _attach_ride_route_points(selected)
         for ride in selected:
-            writer.writerow([ride.completed_at, ride.id, ride.driver.full_name, ride.driver.vehicle_plate, ride.client.full_name, ride.origin_address, ride.destination_address, ride.distance_km or 0, ride.effective_price])
+            route = " → ".join(point.address if hasattr(point, "address") else point["address"] for point in ride.route_points)
+            writer.writerow([ride.completed_at, ride.id, ride.driver.full_name, ride.driver.vehicle_plate, ride.client.full_name, route, "", ride.distance_km or 0, ride.effective_price])
         return response
+    selected = selected.prefetch_related("stops")
+    page, per_page = _paginate(request, selected, 10)
+    _attach_ride_route_points(page.object_list)
     return render(request, "driver/earnings.html", {
         **_driver_common_context(driver), "period": period, "start": start, "end": end,
-        "rides": selected, "total": totals["total"] or Decimal("0"), "trip_count": totals["trips"] or 0,
+        "rides": page, "total": totals["total"] or Decimal("0"), "trip_count": totals["trips"] or 0,
         "distance": totals["distance"] or Decimal("0"), "fleet_profiles": fleet_profiles,
-        "driver_profile_id": driver_profile_id,
+        "driver_profile_id": driver_profile_id, "month_value": month_value, "year_value": year_value,
+        "per_page": per_page, "page_size_options": PAGE_SIZE_OPTIONS,
     })
 
 
@@ -1761,8 +1845,11 @@ def profile_list(request, kind):
         queryset = queryset.filter(is_active=True)
     elif status == "inactive":
         queryset = queryset.filter(is_active=False)
-    page = Paginator(queryset, 15).get_page(request.GET.get("page"))
-    return render(request, "panel/profile_list.html", {"kind": kind, "config": config, "page": page, "query": query, "status": status})
+    page, per_page = _paginate(request, queryset, 10)
+    return render(request, "panel/profile_list.html", {
+        "kind": kind, "config": config, "page": page, "query": query, "status": status,
+        "per_page": per_page, "page_size_options": PAGE_SIZE_OPTIONS,
+    })
 
 
 @admin_required
