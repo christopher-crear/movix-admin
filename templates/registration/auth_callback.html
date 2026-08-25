@@ -12,7 +12,7 @@
     document.getElementById('authSessionForm').submit();
     return;
   }
-  document.getElementById('authStatus').textContent = error || 'Google no devolvió una sesión. Verifica la URL de redirección configurada en Supabase.';
+  document.getElementById('authStatus').textContent = error || 'No se pudo completar el acceso con Google. Regresa e inténtalo nuevamente.';
   document.getElementById('authReturn').hidden = false;
 })();
 </script></body></html>

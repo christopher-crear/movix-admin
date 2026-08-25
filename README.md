@@ -25,9 +25,11 @@ El sistema utiliza las tablas existentes de la app móvil (`profiles`, `rides`, 
 - Transportistas mediante correo/contraseña de Supabase Auth o Google.
 - Portal privado del transportista con ganancias por día, semana, mes y año, detalle por carrera y exportación CSV.
 - Encomiendas multipunto con varias recogidas y entregas ordenadas, contacto por parada y tiempo en horas/minutos.
+- El portal reconoce tanto `rides.route_stops` (JSON usado por la app móvil) como la tabla auxiliar `ride_stops`, y muestra automáticamente la ruta más completa.
 - Rangos automáticos `MOVIX Inicial`, `MOVIX Pro` y `Estrella MOVIX` para clientes y transportistas.
 - Alerta visible para transportistas y administradores cuando un cliente tiene menos de 3 estrellas.
 - Gestión de flotas por compañía: el dueño y cada chofer son perfiles completos de transportista con acceso propio a la app; el administrador únicamente los agrupa y los vehículos se obtienen de cada perfil.
+- Las flotas se presentan primero por dueño y luego por compañía dentro de cada dueño; los reportes separan cada recogida y entrega en columnas independientes.
 - Permiso de operación cargable como fotografía o PDF, disponible en verificación documental.
 - Listado paginado de carreras asignadas, filtros y detalle completo de cada servicio.
 - Comentarios y calificaciones reales de `driver_reviews` con distribución por estrellas.

@@ -64,7 +64,6 @@ from .models import (
     PaymentBankAccount,
     Profile,
     Ride,
-    RideStop,
     SystemSetting,
 )
 from .services import (
@@ -105,6 +104,15 @@ REVERIFICATION_FIELDS = {
     "identification_number", "license_number", "vehicle_plate", "vehicle_year",
     "vehicle_type", "identification_file", "license_file", "registration_file", "insurance_file", "permit_file",
 }
+
+
+def _friendly_error(exc, fallback="No se pudo completar la operación. Revisa los datos e inténtalo nuevamente."):
+    """Evita mostrar nombres de servicios, consultas o errores internos."""
+    if isinstance(exc, DatabaseError):
+        return fallback
+    message = "; ".join(exc.messages) if isinstance(exc, ValidationError) else str(exc)
+    technical_terms = ("supabase", "postgres", "pl/pgsql", "sql", "storage", "database", "context:")
+    return fallback if any(term in message.lower() for term in technical_terms) else message
 
 
 def _profile_document_items(profile, keys=None):
@@ -281,7 +289,7 @@ def driver_registration(request):
                         delete_supabase_auth_user(created_auth_id)
                     except (ValidationError, requests.RequestException):
                         pass
-                form.add_error(None, exc)
+                form.add_error(None, _friendly_error(exc))
     return render(request, "registration/driver_register.html", {
         "form": form,
         "google_registration": google_registration,
@@ -354,7 +362,7 @@ def _portal_profile_from_auth(request, auth_user, auth_payload):
     user_id = auth_user.get("id")
     email = (auth_user.get("email") or "").strip()
     if not user_id:
-        raise ValidationError("Supabase no devolvió el identificador de la cuenta.")
+        raise ValidationError("No se pudo identificar la cuenta. Intenta iniciar sesión nuevamente.")
     profile = Profile.objects.filter(pk=user_id).first()
     metadata = auth_user.get("user_metadata") or {}
     app_metadata = auth_user.get("app_metadata") or {}
@@ -373,7 +381,7 @@ def _portal_profile_from_auth(request, auth_user, auth_payload):
         if provider == "google":
             request.session["google_driver_registration"] = google_registration_data
             return reverse("driver_registration")
-        raise ValidationError("La cuenta existe en Supabase Auth, pero todavía no tiene un perfil en MOVIX.")
+        raise ValidationError("La cuenta todavía no tiene un perfil habilitado en MOVIX.")
     if profile.account_blocked:
         raise ValidationError("Tu cuenta está bloqueada. Comunícate con soporte MOVIX.")
 
@@ -587,21 +595,99 @@ def _paginate(request, queryset, default=10, page_param="page"):
     per_page = _page_size(request, default)
     if per_page == "all":
         # Se conserva una sola página para que el control sea consistente.
-        per_page = max(queryset.count(), 1)
+        total = queryset.count() if hasattr(queryset, "model") else len(queryset)
+        per_page = max(total, 1)
     return Paginator(queryset, per_page).get_page(request.GET.get(page_param)), request.GET.get("per_page", str(default))
 
 
 def _attach_ride_route_points(rides):
-    """Evita consultas por fila y expone todos los puntos de una carrera."""
+    """Expone la ruta más completa entre el JSON móvil y la tabla auxiliar."""
     for ride in rides:
-        stops = list(ride.stops.all())
-        if not stops:
-            stops = [
+        table_points = list(ride.stops.all())
+        json_points = _normalize_route_stops(ride.route_stops)
+        if json_points and len(json_points) >= len(table_points):
+            ride.route_points = json_points
+        elif table_points:
+            ride.route_points = table_points
+        else:
+            ride.route_points = [
                 {"type_label": "Recogida", "sequence": 1, "address": ride.origin_address},
                 {"type_label": "Entrega", "sequence": 1, "address": ride.destination_address},
             ]
-        ride.route_points = stops
     return rides
+
+
+def _normalize_route_stops(raw):
+    """Admite las variantes históricas usadas por la aplicación móvil."""
+    if not raw:
+        return []
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (TypeError, ValueError):
+            return []
+    if isinstance(raw, dict):
+        for key in ("stops", "route_stops", "points", "routePoints"):
+            if isinstance(raw.get(key), list):
+                raw = raw[key]
+                break
+        else:
+            raw = [
+                *((raw.get("pickups") or raw.get("pickup_points") or raw.get("recogidas") or [])),
+                *((raw.get("deliveries") or raw.get("delivery_points") or raw.get("entregas") or [])),
+            ]
+    if not isinstance(raw, list):
+        return []
+
+    result, counters = [], {"Recogida": 0, "Entrega": 0}
+    for index, item in enumerate(raw):
+        if isinstance(item, str):
+            item = {"address": item}
+        if not isinstance(item, dict):
+            continue
+        raw_type = str(
+            item.get("stop_type") or item.get("type") or item.get("kind")
+            or item.get("point_type") or item.get("category") or ""
+        ).lower()
+        pickup = any(value in raw_type for value in ("pickup", "recog", "origin", "origen"))
+        delivery = any(value in raw_type for value in ("delivery", "entreg", "destination", "destino"))
+        type_label = "Recogida" if pickup or (not delivery and index == 0) else "Entrega"
+        address = (
+            item.get("address") or item.get("formatted_address") or item.get("formattedAddress")
+            or item.get("location_name") or item.get("locationName") or item.get("name")
+            or item.get("description") or item.get("label")
+        )
+        location = item.get("location")
+        if not address and isinstance(location, dict):
+            address = location.get("address") or location.get("name") or location.get("description")
+        if not address:
+            continue
+        counters[type_label] += 1
+        result.append({
+            "type_label": type_label,
+            "sequence": counters[type_label],
+            "address": str(address),
+            "contact_name": item.get("contact_name") or item.get("contactName") or "",
+            "contact_phone": item.get("contact_phone") or item.get("contactPhone") or "",
+            "notes": item.get("notes") or item.get("instructions") or "",
+        })
+    return result
+
+
+def _company_groups(profiles):
+    """Agrupa perfiles por compañía sin perder la relación principal del dueño."""
+    grouped = {}
+    for profile in profiles:
+        company = (profile.company_name or "").strip() or "Sin compañía registrada"
+        grouped.setdefault(company, []).append(profile)
+    return [
+        {
+            "name": name,
+            "members": sorted(members, key=lambda item: (item.first_name or "", item.last_name or "")),
+            "vehicle_count": sum(bool(member.vehicle_plate) for member in members),
+        }
+        for name, members in sorted(grouped.items(), key=lambda item: item[0].lower())
+    ]
 
 
 def _driver_common_context(driver):
@@ -728,18 +814,11 @@ def driver_rides(request):
 def driver_ride_detail(request, ride_id):
     driver = _current_driver(request)
     allowed_drivers = Profile.objects.filter(Q(pk=driver.pk) | Q(fleet_owner=driver)) if driver.is_fleet_owner else Profile.objects.filter(pk=driver.pk)
-    ride = get_object_or_404(Ride.objects.select_related("client", "driver"), pk=ride_id, driver__in=allowed_drivers)
+    ride = get_object_or_404(Ride.objects.select_related("client", "driver").prefetch_related("stops"), pk=ride_id, driver__in=allowed_drivers)
     review = DriverReview.objects.filter(ride=ride, driver=ride.driver).select_related("client").first()
     client_photo = ride.client.profile_photo_url or ride.client.avatar_url
-    try:
-        stops = list(RideStop.objects.filter(ride=ride))
-    except DatabaseError:
-        stops = []
-    if not stops:
-        stops = [
-            {"type_label": "Recogida", "sequence": 1, "address": ride.origin_address, "contact_name": "", "contact_phone": "", "notes": ""},
-            {"type_label": "Entrega", "sequence": 1, "address": ride.destination_address, "contact_name": "", "contact_phone": "", "notes": ""},
-        ]
+    _attach_ride_route_points([ride])
+    stops = ride.route_points
     context = {
         **_driver_common_context(driver),
         "ride": ride,
@@ -806,7 +885,7 @@ def driver_profile(request):
             return redirect("panel:driver_profile")
         except (ValidationError, DatabaseError) as exc:
             _finish_file_replacements(replacements, saved=False)
-            profile_form.add_error(None, exc)
+            profile_form.add_error(None, _friendly_error(exc, "No se pudo actualizar tu perfil. Revisa los datos e inténtalo nuevamente."))
 
     if request.method == "POST" and action == "password" and password_form.is_valid():
         token = request.session.get("portal_access_token", "")
@@ -815,10 +894,10 @@ def driver_profile(request):
         else:
             try:
                 supabase_update_password(token, password_form.cleaned_data["new_password"])
-                messages.success(request, "Tu contraseña de Supabase fue actualizada.")
+                messages.success(request, "Tu contraseña fue actualizada correctamente.")
                 return redirect("panel:driver_profile")
             except ValidationError as exc:
-                password_form.add_error(None, exc)
+                password_form.add_error(None, _friendly_error(exc, "No se pudo cambiar la contraseña. Inténtalo nuevamente."))
 
     context = {
         **_driver_common_context(driver),
@@ -872,12 +951,30 @@ def driver_earnings(request):
         response["Content-Disposition"] = f'attachment; filename="ganancias_movix_{period}_{start}.csv"'
         response.write("\ufeff")
         writer = csv.writer(response)
-        writer.writerow(["Fecha", "Carrera", "Chofer", "Placa", "Cliente", "Origen", "Destino", "Distancia km", "Ganancia USD"])
-        selected = selected.prefetch_related("stops")
-        _attach_ride_route_points(selected)
-        for ride in selected:
-            route = " → ".join(point.address if hasattr(point, "address") else point["address"] for point in ride.route_points)
-            writer.writerow([ride.completed_at, ride.id, ride.driver.full_name, ride.driver.vehicle_plate, ride.client.full_name, route, "", ride.distance_km or 0, ride.effective_price])
+        export_rides = list(selected.prefetch_related("stops"))
+        _attach_ride_route_points(export_rides)
+        route_rows, max_pickups, max_deliveries = [], 0, 0
+        for ride in export_rides:
+            pickups, deliveries = [], []
+            for point in ride.route_points:
+                label = point.type_label if hasattr(point, "type_label") else point.get("type_label", "Entrega")
+                address = point.address if hasattr(point, "address") else point.get("address", "")
+                (pickups if label == "Recogida" else deliveries).append(address)
+            max_pickups, max_deliveries = max(max_pickups, len(pickups)), max(max_deliveries, len(deliveries))
+            route_rows.append((ride, pickups, deliveries))
+        writer.writerow([
+            "Fecha", "Carrera", "Chofer", "Placa", "Cliente",
+            *[f"Recogida {index}" for index in range(1, max_pickups + 1)],
+            *[f"Entrega {index}" for index in range(1, max_deliveries + 1)],
+            "Distancia km", "Ganancia USD",
+        ])
+        for ride, pickups, deliveries in route_rows:
+            writer.writerow([
+                ride.completed_at, ride.id, ride.driver.full_name, ride.driver.vehicle_plate,
+                ride.client.full_name, *pickups, *([""] * (max_pickups - len(pickups))),
+                *deliveries, *([""] * (max_deliveries - len(deliveries))),
+                ride.distance_km or 0, ride.effective_price,
+            ])
         return response
     selected = selected.prefetch_related("stops")
     page, per_page = _paginate(request, selected, 10)
@@ -897,48 +994,46 @@ def driver_fleet(request):
     try:
         fleet_owner = driver if driver.is_fleet_owner else driver.fleet_owner
         if driver.is_fleet_owner:
-            members = Profile.objects.filter(fleet_owner=driver).select_related("fleet_owner").order_by("first_name", "last_name")
-            vehicle_profiles = Profile.objects.filter(Q(pk=driver.pk) | Q(fleet_owner=driver)).exclude(vehicle_plate__isnull=True).exclude(vehicle_plate="").order_by("first_name")
+            profiles = [driver, *Profile.objects.filter(fleet_owner=driver).select_related("fleet_owner").order_by("first_name", "last_name")]
         else:
-            members = Profile.objects.filter(pk=driver.pk).select_related("fleet_owner")
-            vehicle_profiles = Profile.objects.filter(pk=driver.pk).exclude(vehicle_plate__isnull=True).exclude(vehicle_plate="")
-        vehicle_page = Paginator(vehicle_profiles, 10).get_page(request.GET.get("vehicle_page"))
-        driver_page = Paginator(members, 10).get_page(request.GET.get("driver_page"))
+            profiles = [driver]
+        company_groups = _company_groups(profiles)
     except DatabaseError:
         fleet_owner = None
-        vehicle_page = driver_page = None
-        messages.warning(request, "La estructura de flota aún no está disponible en la base de datos.")
+        company_groups = []
+        messages.warning(request, "No se pudo cargar la información de la flota. Inténtalo nuevamente.")
     return render(request, "driver/fleet.html", {
         **_driver_common_context(driver), "fleet_owner": fleet_owner,
-        "vehicle_page": vehicle_page, "driver_page": driver_page,
+        "company_groups": company_groups,
     })
 
 
 @admin_required
 def admin_fleet(request):
-    """Agrupa perfiles reales de transportista por dueño o compañía."""
+    """Agrupa perfiles por dueño y, dentro de cada flota, por compañía."""
     query = request.GET.get("q", "").strip()
-    owners = _profile_queryset("drivers").filter(is_fleet_owner=True).order_by("company_name", "first_name", "last_name")
-    driver_qs = _profile_queryset("drivers").filter(fleet_owner__isnull=False).select_related("fleet_owner").order_by("fleet_owner__company_name", "first_name")
-    vehicle_qs = _profile_queryset("drivers").filter(Q(is_fleet_owner=True) | Q(fleet_owner__isnull=False)).exclude(vehicle_plate__isnull=True).exclude(vehicle_plate="").select_related("fleet_owner").order_by("company_name", "vehicle_plate")
-    if query:
-        owner_filter = Q(first_name__icontains=query) | Q(last_name__icontains=query) | Q(company_name__icontains=query)
-        owners = owners.filter(owner_filter)
-        driver_qs = driver_qs.filter(Q(first_name__icontains=query) | Q(last_name__icontains=query) | Q(identification_number__icontains=query) | Q(fleet_owner__first_name__icontains=query) | Q(fleet_owner__company_name__icontains=query))
-        vehicle_qs = vehicle_qs.filter(Q(vehicle_plate__icontains=query) | Q(first_name__icontains=query) | Q(last_name__icontains=query) | Q(fleet_owner__company_name__icontains=query))
+    owners = _profile_queryset("drivers").filter(is_fleet_owner=True).prefetch_related("fleet_members").order_by("first_name", "last_name")
     owner_rows = []
     for owner in owners:
-        members = Profile.objects.filter(fleet_owner=owner)
+        profiles = [owner, *list(owner.fleet_members.all())]
+        searchable = " ".join(
+            f"{profile.full_name} {profile.company_name or ''} {profile.vehicle_plate or ''} {profile.identity}"
+            for profile in profiles
+        ).lower()
+        if query and query.lower() not in searchable:
+            continue
         owner_rows.append({
             "owner": owner,
-            "vehicle_count": members.exclude(vehicle_plate__isnull=True).exclude(vehicle_plate="").count() + (1 if owner.vehicle_plate else 0),
-            "driver_count": members.count(),
+            "company_groups": _company_groups(profiles),
+            "vehicle_count": sum(bool(profile.vehicle_plate) for profile in profiles),
+            "driver_count": max(0, len(profiles) - 1),
         })
+    owner_page, per_page = _paginate(request, owner_rows, 10, "owner_page")
     return render(request, "panel/fleet.html", {
-        "owner_page": Paginator(owner_rows, 10).get_page(request.GET.get("owner_page")),
-        "vehicle_page": Paginator(vehicle_qs, 10).get_page(request.GET.get("vehicle_page")),
-        "driver_page": Paginator(driver_qs, 10).get_page(request.GET.get("driver_page")),
+        "owner_page": owner_page,
         "query": query,
+        "per_page": per_page,
+        "page_size_options": PAGE_SIZE_OPTIONS,
         "ungrouped_count": _profile_queryset("drivers").filter(is_fleet_owner=False, fleet_owner__isnull=True).count(),
     })
 
@@ -987,7 +1082,7 @@ def driver_payments(request):
             except (ValidationError, DatabaseError) as exc:
                 if receipt_value:
                     delete_storage_object(receipt_value)
-                form.add_error(None, exc)
+                form.add_error(None, _friendly_error(exc))
 
     payment_status = request.GET.get("status", "all")
     history = DriverMonthlyPayment.objects.filter(driver=driver).select_related("invoice")
@@ -1303,7 +1398,7 @@ def payment_bank_accounts(request):
         except (ValidationError, DatabaseError) as exc:
             for value in uploaded_values:
                 delete_storage_object(value)
-            form.add_error(None, exc)
+            form.add_error(None, _friendly_error(exc))
     accounts = list(PaymentBankAccount.objects.all())
     return render(request, "payments/banks.html", {
         "form": form,
@@ -1328,12 +1423,12 @@ def _storage_value_response(value, action, fallback_name, preferred_buckets):
         raise Http404
     url = resolve_media_url(value, expires=300, preferred_buckets=preferred_buckets)
     if not url:
-        raise Http404("No se encontró el archivo en Supabase Storage.")
+        raise Http404("No se encontró el archivo solicitado.")
     try:
         upstream = requests.get(url, stream=True, timeout=(8, 40), allow_redirects=True)
         upstream.raise_for_status()
     except requests.RequestException as exc:
-        raise Http404("Supabase no pudo entregar el archivo.") from exc
+        raise Http404("No se pudo abrir el archivo solicitado.") from exc
     filename = str(value).split("?", 1)[0].rstrip("/").split("/")[-1] or fallback_name
     content_type = (upstream.headers.get("Content-Type") or mimetypes.guess_type(filename)[0] or "application/octet-stream").split(";", 1)[0]
 
@@ -1927,7 +2022,7 @@ def profile_create(request, kind):
                     delete_supabase_auth_user(created_auth_id)
                 except ValidationError:
                     pass
-            form.add_error(None, exc)
+            form.add_error(None, _friendly_error(exc))
     return render(request, "panel/profile_form.html", {"kind": kind, "config": config, "form": form, "creating": True})
 
 
@@ -1962,7 +2057,7 @@ def profile_edit(request, kind, profile_id):
             return redirect("panel:profile_detail", kind=kind, profile_id=profile.id)
         except (ValidationError, DatabaseError) as exc:
             _finish_file_replacements(replacements, saved=False)
-            form.add_error(None, exc)
+            form.add_error(None, _friendly_error(exc))
     return render(request, "panel/profile_form.html", {"kind": kind, "config": config, "profile": profile, "form": form, "creating": False})
 
 
@@ -1978,7 +2073,7 @@ def profile_delete(request, kind, profile_id):
             profile.delete()
         cache.delete("movix-dashboard-summary-v2")
         audit(request, "delete", "profile", f"Eliminó {config['singular'].lower()} {name}", profile_id)
-        messages.success(request, f"{config['singular']} eliminado de Supabase Auth y de la base de datos.")
+        messages.success(request, f"{config['singular']} eliminado correctamente.")
     except (ValidationError, DatabaseError) as exc:
         messages.error(request, str(exc))
     return redirect("panel:profile_list", kind=kind)
@@ -2128,12 +2223,12 @@ def document_access(request, profile_id, document_key, action="view"):
     if not url:
         if action == "view":
             svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="720" height="420" viewBox="0 0 720 420">
-            <rect width="720" height="420" rx="22" fill="#edf8ff"/><g fill="none" stroke="#2d6bea" stroke-width="10" stroke-linecap="round"><rect x="290" y="105" width="140" height="120" rx="18"/><path d="m305 207 42-45 35 32 24-25 20 19"/><path d="M300 292h120"/></g><text x="360" y="335" text-anchor="middle" font-family="Arial,sans-serif" font-size="23" font-weight="700" fill="#183153">No se encontró {escape(label)}</text><text x="360" y="370" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" fill="#6c7f9c">Revisa la ruta y el bucket guardados en Supabase</text></svg>"""
+            <rect width="720" height="420" rx="22" fill="#edf8ff"/><g fill="none" stroke="#2d6bea" stroke-width="10" stroke-linecap="round"><rect x="290" y="105" width="140" height="120" rx="18"/><path d="m305 207 42-45 35 32 24-25 20 19"/><path d="M300 292h120"/></g><text x="360" y="335" text-anchor="middle" font-family="Arial,sans-serif" font-size="23" font-weight="700" fill="#183153">No se encontró {escape(label)}</text><text x="360" y="370" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" fill="#6c7f9c">Vuelve a cargar el archivo desde el perfil</text></svg>"""
             placeholder = HttpResponse(svg, content_type="image/svg+xml")
             placeholder["X-Movix-Media-Status"] = "storage-object-not-found"
             placeholder["Cache-Control"] = "no-store"
             return placeholder
-        messages.error(request, "El campo existe, pero no coincide con ningún objeto accesible de Supabase Storage.")
+        messages.error(request, "No se encontró el archivo solicitado. Revisa que haya sido cargado correctamente.")
         return redirect("panel:verification_detail", profile_id=profile.id)
     # El navegador no se redirige directamente a Supabase. Django descarga el
     # objeto con la URL pública/firmada recién generada y lo sirve desde el mismo
@@ -2149,12 +2244,12 @@ def document_access(request, profile_id, document_key, action="view"):
             upstream.close()
         if action == "view":
             svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="720" height="420" viewBox="0 0 720 420">
-            <rect width="720" height="420" rx="22" fill="#edf8ff"/><g fill="none" stroke="#ef4444" stroke-width="10" stroke-linecap="round"><rect x="290" y="105" width="140" height="120" rx="18"/><path d="m305 207 42-45 35 32 24-25 20 19"/><path d="M300 292h120"/></g><text x="360" y="335" text-anchor="middle" font-family="Arial,sans-serif" font-size="23" font-weight="700" fill="#183153">Supabase no entregó {escape(label)}</text><text x="360" y="370" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" fill="#6c7f9c">Comprueba SUPABASE_SERVICE_ROLE_KEY y la ruta del objeto</text></svg>"""
+            <rect width="720" height="420" rx="22" fill="#edf8ff"/><g fill="none" stroke="#ef4444" stroke-width="10" stroke-linecap="round"><rect x="290" y="105" width="140" height="120" rx="18"/><path d="m305 207 42-45 35 32 24-25 20 19"/><path d="M300 292h120"/></g><text x="360" y="335" text-anchor="middle" font-family="Arial,sans-serif" font-size="23" font-weight="700" fill="#183153">No se pudo abrir {escape(label)}</text><text x="360" y="370" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" fill="#6c7f9c">Inténtalo nuevamente en unos momentos</text></svg>"""
             placeholder = HttpResponse(svg, content_type="image/svg+xml")
             placeholder["X-Movix-Media-Status"] = "storage-download-failed"
             placeholder["Cache-Control"] = "no-store"
             return placeholder
-        messages.error(request, "Supabase encontró la ruta, pero no permitió descargar el archivo.")
+        messages.error(request, "No se pudo descargar el archivo. Inténtalo nuevamente.")
         return redirect("panel:verification_detail", profile_id=profile.id)
 
     raw_name = str(value).split("?", 1)[0].rstrip("/").split("/")[-1]
@@ -2168,13 +2263,13 @@ def document_access(request, profile_id, document_key, action="view"):
         upstream.close()
         if action == "view":
             placeholder = HttpResponse(
-                '<svg xmlns="http://www.w3.org/2000/svg" width="720" height="420"><rect width="100%" height="100%" rx="22" fill="#edf8ff"/><text x="50%" y="48%" text-anchor="middle" font-family="Arial" font-size="24" font-weight="700" fill="#183153">El archivo no pudo abrirse</text><text x="50%" y="57%" text-anchor="middle" font-family="Arial" font-size="16" fill="#6c7f9c">Supabase devolvió una respuesta de permisos</text></svg>',
+                '<svg xmlns="http://www.w3.org/2000/svg" width="720" height="420"><rect width="100%" height="100%" rx="22" fill="#edf8ff"/><text x="50%" y="48%" text-anchor="middle" font-family="Arial" font-size="24" font-weight="700" fill="#183153">El archivo no pudo abrirse</text><text x="50%" y="57%" text-anchor="middle" font-family="Arial" font-size="16" fill="#6c7f9c">El archivo no está disponible en este momento</text></svg>',
                 content_type="image/svg+xml",
             )
             placeholder["X-Movix-Media-Status"] = "storage-invalid-response"
             placeholder["Cache-Control"] = "no-store"
             return placeholder
-        messages.error(request, "Supabase devolvió una respuesta de permisos en lugar del archivo.")
+        messages.error(request, "No tienes acceso al archivo o ya no está disponible.")
         return redirect("panel:verification_detail", profile_id=profile.id)
 
     def stream_file():
@@ -2208,12 +2303,12 @@ def monthly_payment_receipt(request, payment_id, action="view"):
         preferred_buckets=(settings.SUPABASE_PRIVATE_BUCKET, settings.SUPABASE_PUBLIC_BUCKET),
     )
     if not url:
-        raise Http404("No se encontró el comprobante en Supabase Storage.")
+        raise Http404("No se encontró el comprobante solicitado.")
     try:
         upstream = requests.get(url, stream=True, timeout=(8, 40), allow_redirects=True)
         upstream.raise_for_status()
     except requests.RequestException as exc:
-        raise Http404("Supabase no pudo entregar el comprobante.") from exc
+        raise Http404("No se pudo abrir el comprobante solicitado.") from exc
     filename = str(payment.receipt_url).split("?", 1)[0].rstrip("/").split("/")[-1] or "comprobante"
     content_type = (upstream.headers.get("Content-Type") or mimetypes.guess_type(filename)[0] or "application/octet-stream").split(";", 1)[0]
 
@@ -2304,7 +2399,7 @@ def advertisements_view(request):
         except (ValidationError, DatabaseError) as exc:
             if uploaded_value:
                 delete_storage_object(uploaded_value)
-            form.add_error(None, exc)
+            form.add_error(None, _friendly_error(exc))
     advertisements = Advertisement.objects.all()
     return render(request, "panel/advertisements.html", {"form": form, "advertisements": advertisements})
 
@@ -2357,7 +2452,7 @@ def admin_profile_view(request):
                 messages.success(request, "Perfil actualizado.")
                 return redirect("panel:admin_profile")
             except ValidationError as exc:
-                profile_form.add_error(None, exc)
+                profile_form.add_error(None, _friendly_error(exc))
         if action == "password" and password_form.is_valid():
             user = password_form.save()
             update_session_auth_hash(request, user)

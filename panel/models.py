@@ -195,6 +195,7 @@ class Ride(models.Model):
     destination_latitude = models.FloatField(blank=True, null=True)
     destination_longitude = models.FloatField(blank=True, null=True)
     driver_price = models.DecimalField(max_digits=12, decimal_places=2, blank=True, null=True)
+    route_stops = models.JSONField(blank=True, null=True)
 
     class Meta:
         managed = False

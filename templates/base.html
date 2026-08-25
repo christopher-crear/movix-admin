@@ -7,7 +7,7 @@
     <meta name="description" content="Panel MOVIX">
     <title>{% block title %}Panel{% endblock %} · {{ system_config.app_name|default:'MOVIX' }}</title>
     <link rel="icon" href="{% static 'img/ICONO_APP.png' %}" type="image/svg+xml">
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260824-5">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260824-6">
     {% block styles %}{% endblock %}
     <style id="movix-critical-media-v60">
         /* Reglas críticas incluidas en el HTML: evitan miniaturas desbordadas aunque
@@ -188,10 +188,10 @@
 </dialog>
 <dialog class="document-preview-dialog" id="documentPreviewDialog">
     <header><div><span class="preview-kicker">Vista previa</span><h2 id="documentPreviewTitle">Documento</h2></div><button class="icon-button" type="button" data-preview-close aria-label="Cerrar"><svg><use href="#i-x"/></svg></button></header>
-    <div class="document-preview-stage" id="documentPreviewStage"><img id="documentPreviewImage" alt="Vista previa del documento"><iframe id="documentPreviewFrame" title="Vista previa del documento"></iframe><div class="preview-loading"><svg><use href="#i-file"/></svg><span>Cargando archivo…</span></div><div class="preview-error-message"><svg><use href="#i-file"/></svg><strong>No se pudo cargar la vista previa</strong><span>Comprueba la clave de servicio y el objeto en Supabase Storage.</span></div></div>
+    <div class="document-preview-stage" id="documentPreviewStage"><img id="documentPreviewImage" alt="Vista previa del documento"><iframe id="documentPreviewFrame" title="Vista previa del documento"></iframe><div class="preview-loading"><svg><use href="#i-file"/></svg><span>Cargando archivo…</span></div><div class="preview-error-message"><svg><use href="#i-file"/></svg><strong>No se pudo cargar la vista previa</strong><span>Inténtalo nuevamente o descarga el archivo original.</span></div></div>
     <footer><span id="documentPreviewName"></span><a class="btn btn-secondary" id="documentPreviewDownload" href="#"><svg><use href="#i-download"/></svg> Descargar original</a></footer>
 </dialog>
-<script src="{% static 'js/app.js' %}?v=20260824-5"></script>
+<script src="{% static 'js/app.js' %}?v=20260824-6"></script>
 <script>document.querySelectorAll('.sidebar .nav-link').forEach(function(el){var text=el.querySelector('span')?.textContent?.trim();if(text){el.dataset.tooltip=text;el.setAttribute('aria-label',text);}});</script>
 {% block scripts %}{% endblock %}
 </body>

@@ -461,14 +461,27 @@ class PanelIntegrationTests(TransactionTestCase):
         self.assertEqual(ride.estimated_duration_label, "2 h 15 min")
 
     def test_driver_sees_multipoint_route_earnings_and_fleet_modules(self):
-        ride = self._create_driver_ride(estimated_minutes=75)
+        ride = self._create_driver_ride(
+            estimated_minutes=75,
+            route_stops=[
+                {"type": "pickup", "address": "Bodega norte"},
+                {"type": "delivery", "address": "Entrega centro"},
+                {"type": "delivery", "address": "Entrega sur"},
+            ],
+        )
         RideStop.objects.create(id=uuid.uuid4(), ride=ride, stop_type="pickup", sequence=1, address="Bodega norte", created_at=timezone.now())
         RideStop.objects.create(id=uuid.uuid4(), ride=ride, stop_type="delivery", sequence=2, address="Entrega sur", created_at=timezone.now())
         self._open_driver_session()
         detail = self.client.get(reverse("panel:driver_ride_detail", args=[ride.id]))
         self.assertContains(detail, "Bodega norte")
+        self.assertContains(detail, "Entrega centro")
         self.assertContains(detail, "1 h 15 min")
-        self.assertEqual(self.client.get(reverse("panel:driver_earnings")).status_code, 200)
+        rides = self.client.get(reverse("panel:driver_rides"))
+        self.assertContains(rides, "Entrega centro")
+        earnings = self.client.get(reverse("panel:driver_earnings"))
+        self.assertEqual(earnings.status_code, 200)
+        export = self.client.get(reverse("panel:driver_earnings"), {"export": "csv"})
+        self.assertIn("Entrega 2", export.content.decode("utf-8-sig"))
         self.assertEqual(self.client.get(reverse("panel:driver_fleet")).status_code, 200)
 
     def test_fleet_owner_sees_real_driver_profiles_and_their_earnings(self):
@@ -986,8 +999,8 @@ class PanelIntegrationTests(TransactionTestCase):
         self.assertContains(detail, "asset-preview-name")
         self.assertContains(detail, "asset-preview-download")
         self.assertContains(detail, "movix-critical-media-v60")
-        self.assertContains(detail, "app.css?v=20260824-5", html=False)
-        self.assertContains(detail, "app.js?v=20260824-5", html=False)
+        self.assertContains(detail, "app.css?v=20260824-6", html=False)
+        self.assertContains(detail, "app.js?v=20260824-6", html=False)
         self.assertContains(detail, ".document-preview-stage.show-pdf>img{display:none!important}", html=False)
 
         profile = self.client.get(reverse("panel:profile_detail", args=["users", self.user_profile.id]))

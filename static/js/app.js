@@ -11,6 +11,30 @@
   }));
   scrim?.addEventListener('click', () => { sidebar?.classList.remove('mobile-open'); scrim.classList.remove('open'); });
 
+  // Tooltip fuera del contenedor desplazable: al estar fijado al documento no
+  // se recorta por el borde del menú lateral.
+  const menuTooltip = document.createElement('div');
+  menuTooltip.className = 'menu-tooltip';
+  menuTooltip.setAttribute('role', 'tooltip');
+  document.body.appendChild(menuTooltip);
+  const showMenuTooltip = link => {
+    if (!shell?.classList.contains('sidebar-collapsed') || mobile()) return;
+    const label = link.dataset.tooltip || link.querySelector('span')?.textContent?.trim();
+    if (!label) return;
+    const rect = link.getBoundingClientRect();
+    menuTooltip.textContent = label;
+    menuTooltip.style.left = `${rect.right + 12}px`;
+    menuTooltip.style.top = `${Math.max(8, Math.min(window.innerHeight - 48, rect.top + rect.height / 2 - 18))}px`;
+    menuTooltip.classList.add('visible');
+  };
+  const hideMenuTooltip = () => menuTooltip.classList.remove('visible');
+  document.querySelectorAll('.sidebar .nav-link').forEach(link => {
+    link.addEventListener('mouseenter', () => showMenuTooltip(link));
+    link.addEventListener('mouseleave', hideMenuTooltip);
+    link.addEventListener('focus', () => showMenuTooltip(link));
+    link.addEventListener('blur', hideMenuTooltip);
+  });
+
   document.querySelectorAll('[data-dropdown-toggle]').forEach(button => button.addEventListener('click', event => {
     event.stopPropagation(); document.getElementById(button.dataset.dropdownToggle)?.classList.toggle('open');
   }));
